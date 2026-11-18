@@ -156,5 +156,17 @@ real `private.toml` present they also check the real render).
 
 ## License
 
-No license file yet: until the owner picks one, the code is visible but not licensed for reuse. Each skill in
-`vendor-skills/` keeps its own `LICENSE` and `NOTICE.md`.
+MIT: see [LICENSE](LICENSE). Each skill in `vendor-skills/` keeps its own `LICENSE` and `NOTICE.md`, and those
+terms apply to that skill.
+
+## Disclaimer
+
+This software is provided "as is", under the MIT License, without warranty of any kind. You use it at your own
+risk. The authors and contributors accept no responsibility and no liability for anything that results from
+using, copying, changing or deploying it, including lost or damaged data, outages, security incidents, suspended
+accounts, and bills (model, API, cloud or any other charges).
+
+It comes with no support and no promise: no one is obliged to answer issues, fix bugs, review changes or keep it
+working. The agents it runs execute commands and spend money on the accounts you connect, so read the code, review
+the configuration and test it on a machine and accounts you can afford to lose. Nothing here is legal, security or
+financial advice.
