@@ -1,0 +1,26 @@
+#!/bin/bash
+# Keep the OpenClaw gateway ahead of the agents' own work on this 6-CPU host.
+# 2026-11-15: 36 runnable processes on 6 vCPUs (19% stolen by the hypervisor), mostly agents' test suites, builds and
+# CI. The gateway got a 1-in-36 share: its event loop stalled 59 s, the owner's messages waited 5-12 minutes before
+# the orchestrator saw them, and messages to the writer were dropped. The gateway runs at nice -10; every agent
+# session (a Claude CLI the gateway starts) and everything it starts runs at nice 10. Run every 30 s by a timer, so
+# new sessions and gateway restarts are covered. Nice only: nothing is stopped.
+set -u
+gw=$(systemctl --user show -p MainPID --value openclaw-gateway 2>/dev/null)
+[ -n "$gw" ] && [ "$gw" != "0" ] && [ -d "/proc/$gw" ] || exit 0
+GW_NICE=${TEAM_GW_NICE:--10}
+AGENT_NICE=${TEAM_AGENT_NICE:-10}
+if [ "$(ps -o ni= -p "$gw" | tr -d ' ')" != "$GW_NICE" ]; then
+  sudo -n renice -n "$GW_NICE" -p $(ls "/proc/$gw/task") >/dev/null 2>&1 || echo "team-prio: could not set the gateway to $GW_NICE"
+fi
+# The agent sessions, and the exec supervisors that run the agents' commands (builds, tests, docker clients),
+# with all their descendants. The gateway and its own helpers (spawn broker, database workers) keep its priority.
+ps -eo pid=,ppid=,ni=,args= | awk -v gw="$gw" -v want="$AGENT_NICE" '
+  { pid[NR]=$1; ppid[NR]=$2; ni[NR]=$3; a=$0; sub(/^ *[0-9]+ +[0-9]+ +-?[0-9]+ +/, "", a); args[NR]=a; n=NR }
+  END {
+    for (i=1;i<=n;i++) if ((ppid[i]==gw && args[i] ~ /claude --strict-mcp-config/) || args[i] ~ /openclaw\/dist\/process\/supervisor\/service-child/) mark[pid[i]]=1
+    changed=1
+    while (changed) { changed=0; for (i=1;i<=n;i++) if (!(pid[i] in mark) && (ppid[i] in mark)) { mark[pid[i]]=1; changed=1 } }
+    for (i=1;i<=n;i++) if ((pid[i] in mark) && ni[i] != want) print pid[i]
+  }' | xargs -r renice -n "$AGENT_NICE" -p >/dev/null 2>&1
+exit 0

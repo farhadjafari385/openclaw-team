@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# No private value (private.toml) and no privacy-pattern hit may be committed: write {{private:KEY}} instead.
+root=$(git rev-parse --show-toplevel)
+out=$("$root/bin/team" leaks 2>&1) || { echo "$out" | grep -E "LEAK|leak check" | head -20; echo "pre-commit: refused (write {{private:KEY}} placeholders; keys in private.example.toml)"; exit 1; }
+exit 0

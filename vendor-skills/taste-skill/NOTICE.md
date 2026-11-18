@@ -1,0 +1,1 @@
+Source: https://github.com/Leonxlnx/taste-skill/tree/9b4bf93/skills/taste-skill (MIT License, see LICENSE), copied unchanged on 2026-11-06. Reviewed: its scripts drive a local headless Chrome for checks, link Google Fonts and fetch pinned icon packages from jsDelivr; no credentials.

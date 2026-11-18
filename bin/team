@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""team: manage the OpenClaw agent team from this repo (the single source of truth).
+
+  team render [--out DIR]          show what would be generated
+  team apply [--dry-run]           install rules, personas, guard and config on this host, locked
+  team verify [-v]                 prove this host matches the repo
+  team drift [--fix] [--notify]    restore anything that drifted (run every 15 min by a timer)
+  team report [--send]             zero-token daily health report (tokens, tasks, stalls, blocks)
+  team gc [--dry-run] [--all]      delete finished task sessions and sessions idle for a day (hourly timer);
+                                   --all deletes every session that is not running
+  team leaks [--commits A..B]      refuse if a private value is in the tracked files (or those commits)
+  team graphs [--force]           install/upgrade the pinned graphify and refresh every code map agents
+                                   must query before reading code (30-minute timer; no AI calls)
+  team disk [--dry-run]            remove task leftovers (browser profiles, idle worktrees, /tmp copies, test
+                                   containers) and warn in Telegram before the disk fills (30-minute timer)
+  team reset --yes                 one-time clean slate: archive memory and task boards, carry open
+                                   inbox work over, delete every session
+"""
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import teamlib  # noqa: E402
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="team", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    r = sub.add_parser("render"); r.add_argument("--out"); r.add_argument("--no-mirror", action="store_true")
+    a = sub.add_parser("apply"); a.add_argument("--dry-run", action="store_true"); a.add_argument("--no-mirror", action="store_true")
+    a.add_argument("--skip-crons", action="store_true"); a.add_argument("--no-restart-hint", action="store_true")
+    v = sub.add_parser("verify"); v.add_argument("-v", "--verbose", action="store_true")
+    d = sub.add_parser("drift"); d.add_argument("--fix", action="store_true"); d.add_argument("--notify", action="store_true")
+    rp = sub.add_parser("report"); rp.add_argument("--send", action="store_true")
+    rs = sub.add_parser("reset"); rs.add_argument("--yes", action="store_true")
+    g = sub.add_parser("gc"); g.add_argument("--dry-run", action="store_true"); g.add_argument("--all", action="store_true", help="delete every session that is not running")
+    dk = sub.add_parser("disk"); dk.add_argument("--dry-run", action="store_true")
+    sub.add_parser("heal", help="restart the gateway when OpenClaw has locked an agent's database")
+    nt = sub.add_parser("notify", help="post a line to the team's system topic"); nt.add_argument("text")
+    lk = sub.add_parser("leaks", help="refuse if any private value or privacy pattern is in the tracked files (or in --commits A..B)")
+    lk.add_argument("--commits")
+    gr = sub.add_parser("graphs"); gr.add_argument("--force", action="store_true", help="re-export and rebuild every map")
+    args = p.parse_args(argv)
+    {"render": teamlib.cmd_render, "apply": teamlib.cmd_apply, "verify": teamlib.cmd_verify, "drift": teamlib.cmd_drift,
+     "report": teamlib.cmd_report, "reset": teamlib.cmd_reset, "gc": teamlib.cmd_gc, "disk": teamlib.cmd_disk, "graphs": teamlib.cmd_graphs, "heal": teamlib.cmd_heal, "leaks": teamlib.cmd_leaks, "notify": teamlib.cmd_notify}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()

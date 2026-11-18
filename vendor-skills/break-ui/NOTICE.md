@@ -1,0 +1,1 @@
+Source: https://github.com/emilkowalski/skills/tree/c8a7962/skills/break-ui (MIT License, see LICENSE), copied unchanged on 2026-11-06 after review: no network calls or shell execution in its scripts.

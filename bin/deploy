@@ -1,0 +1,145 @@
+#!/bin/bash
+# The one safe way to deploy the team (token-guard and/or openclaw-team) on the host.
+# Usage: bin/deploy [~/tg.tgz] [~/team.tgz]   (tar archives of the repos; either may be omitted)
+#    or: bin/deploy --pull   (git pull both checkouts instead of unpacking archives)
+# Env: ORC_QUIET_MIN (default 2), MAX_WAIT_MIN (default 120), DRAIN_AFTER_MIN (default 30),
+#      DEPLOY_IGNORE (job keys known to be finished).
+# Lessons built in (2026-11-05): never restart while a task runs or the orchestrator is mid-turn;
+# set the maintenance flag first (the guard refuses dispatches during the stop); pause drift; one restart;
+# verify; push with the privacy hooks.
+step() { echo; echo "=== $(date -u +%T) $*"; }
+set -a; . ~/.openclaw/gateway.systemd.env; set +a
+export PATH=$HOME/.openclaw/tools/node-v24.21.0/bin:$HOME/.openclaw/bin:$PATH
+FLAG=~/.openclaw/token-guard-state/maintenance
+TG=""; TEAM=""; PULL=""
+[ "${1:-}" = "--pull" ] && { PULL=1; shift; }
+for a in "$@"; do
+  top=$(tar tzf "$a" 2>/dev/null | head -1)
+  case "$top" in openclaw-token-guard/) TG="$a";; openclaw-team/) TEAM="$a";; *) echo "not a team archive: $a"; exit 1;; esac
+done
+[ -n "$TG$TEAM$PULL" ] || { echo "nothing to deploy (give repo archives, or --pull)"; exit 1; }
+# Our own timers stay off while we deploy: on 2026-11-11 the locked-agent check restarted the gateway at 22:38 and
+# this script restarted it again at 22:41, one minute into that start; the half-started gateway and the next start
+# left agents locked. The session clean-up, disk janitor and code maps add load a start cannot take on this host.
+# They pause only once this deploy has its quiet moment and goes ahead, not while it waits for one: on 2026-11-12 a
+# deploy waited hours for a quiet moment and the locked-agent check and the disk janitor were off all that time.
+TIMERS="openclaw-team-heal.timer openclaw-team-gc.timer openclaw-team-disk.timer openclaw-team-graphs.timer"
+pause_timers() {
+  systemctl --user stop $TIMERS
+  # a run already under way (a heal restart, a docker prune) finishes first
+  for i in $(seq 1 120); do systemctl --user is-active --quiet openclaw-team-heal.service openclaw-team-gc.service openclaw-team-disk.service openclaw-team-graphs.service || break; sleep 5; done
+}
+resume_timers() { systemctl --user start $TIMERS; }
+# An agent's pending oc-gateway-restart would restart again after ours: this deploy restarts once for both.
+systemctl --user stop 'oc-gateway-restart-*.service' 2>/dev/null
+trap resume_timers EXIT
+# state: exit 0 = quiet, 1 = only the orchestrator is active, 2 = a task is running,
+# 3 = the gateway started less than STARTUP_QUIET_MIN (20) minutes ago: its start is not over (whoever restarted it).
+state() { python3 - <<'PY'
+import json, time, sys, subprocess
+import os
+d = json.load(open(os.path.expanduser("~/.openclaw/token-guard-state/jobs.json")))
+now = time.time() * 1000
+# DEPLOY_IGNORE: comma-separated job keys (or parts) known to be finished although still marked running.
+ign = [x for x in os.environ.get("DEPLOY_IGNORE", "").split(",") if x]
+run = [j["label"][:60] for k, j in d["jobs"].items() if j.get("status") == "running" and not any(x in k for x in ign)]
+orc = max([0] + list(d.get("orcActivity", {}).values()))
+quiet = (now - orc) / 60000
+def gateway_age():
+    try:
+        pid = subprocess.run(["systemctl", "--user", "show", "-p", "MainPID", "--value", "openclaw-gateway"], capture_output=True, text=True, timeout=30).stdout.strip()
+        if not pid or pid == "0":
+            return None
+        out = subprocess.run(["ps", "-o", "etimes=", "-p", pid], capture_output=True, text=True, timeout=30).stdout.strip()
+        return int(out) if out.isdigit() else None
+    except Exception:
+        return None
+age = gateway_age()
+young = age is not None and age < float(os.environ.get("STARTUP_QUIET_MIN", "20")) * 60
+print("running:", run, "| orchestrator quiet for %.1f min" % quiet + (" | gateway started %d min ago" % (age // 60) if young else ""))
+sys.exit(2 if run else 3 if young else 1 if quiet < float(os.environ.get("ORC_QUIET_MIN", "2")) else 0)
+PY
+}
+WAIT_MIN=${MAX_WAIT_MIN:-120}
+DEADLINE=$(( $(date +%s) + WAIT_MIN * 60 ))
+# A busy team is never quiet (on 2026-11-10 three tasks ran back to back and a deploy waited 90 minutes for
+# nothing). After DRAIN_AFTER_MIN the maintenance flag goes on: no new task starts, the running ones finish
+# (a task is time-boxed to 60 minutes), then the restart. The guard honours the flag for 30 minutes after
+# its last touch, so the wait keeps touching it.
+DRAIN_AT=$(( $(date +%s) + ${DRAIN_AFTER_MIN:-30} * 60 ))
+draining() { [ $(date +%s) -ge $DRAIN_AT ]; }
+while :; do
+  step "wait for a quiet moment (no task, orchestrator idle ${ORC_QUIET_MIN:-2} min), until $(date -u -d @$DEADLINE +%T)"
+  while [ $(date +%s) -lt $DEADLINE ]; do
+    state >/dev/null; rc=$?
+    [ $rc -eq 0 ] && break
+    [ $rc -eq 1 ] && [ -f $FLAG ] && break   # draining and no task left: the orchestrator's dispatches are refused
+    if draining; then
+      [ -f $FLAG ] || { step "no quiet moment: maintenance flag on, no new tasks; waiting for the running ones to finish"; mkdir -p "$(dirname $FLAG)"; }
+      touch $FLAG
+    fi
+    sleep 30
+  done
+  state; rc=$?
+  if [ $rc -eq 2 ] || [ $rc -eq 3 ] || { [ $rc -eq 1 ] && [ ! -f $FLAG ]; }; then echo "never quiet: not deploying"; rm -f $FLAG; exit 1; fi
+  # From here the guard refuses new dispatches (maintenance flag), so an orchestrator turn in flight cannot
+  # start a task that the restart would cut. Give that turn up to 3 minutes to end; only a running task stops us.
+  step "maintenance flag on (no new dispatches); our timers pause"; mkdir -p "$(dirname $FLAG)"; touch $FLAG
+  pause_timers
+  for i in $(seq 1 12); do sleep 15; state >/dev/null; [ $? -eq 1 ] || break; done
+  state; rc=$?
+  [ $rc -ne 2 ] && [ $rc -ne 3 ] && break
+  echo "a task started, or the gateway was restarted, before the flag: waiting"; draining || rm -f $FLAG; resume_timers
+done
+[ $rc -eq 1 ] && echo "orchestrator still mid-turn: going ahead (its dispatches are refused while the flag is on)"
+step "pause drift"; systemctl --user stop openclaw-team-drift.timer
+step "unpack"
+if [ -n "$PULL" ]; then
+  for r in openclaw-token-guard openclaw-team; do git -C ~/$r pull --ff-only || { echo "git pull failed in $r: not deploying"; rm -f $FLAG; systemctl --user start openclaw-team-drift.timer; exit 1; }; done
+fi
+[ -n "$TG" ] && { rm -rf ~/openclaw-token-guard && tar xzf "$TG" -C ~ && rm -f "$TG"; }
+[ -n "$TEAM" ] && { rm -rf ~/openclaw-team && tar xzf "$TEAM" -C ~ && rm -f "$TEAM"; }
+for r in openclaw-token-guard openclaw-team; do (cd ~/$r && git config core.hooksPath .githooks && echo "$r $(git log --oneline -1)"); done
+# The tests gate the deploy: a failure stops it here, before the gateway is touched. (On 2026-11-07 a
+# deploy printed "fail 1" and went on.)
+TLOG=$(mktemp); TESTS=0
+(cd ~/openclaw-token-guard/plugin && node --test test/*.test.js >"$TLOG.node" 2>&1) || TESTS=1
+grep -E "^ℹ (pass|fail)" "$TLOG.node"
+(cd ~/openclaw-team && python3 -m unittest discover -s tests -q >"$TLOG.py" 2>&1) || TESTS=1
+tail -1 "$TLOG.py"
+if [ "$TESTS" != 0 ]; then
+  grep -E "^not ok|^\s+error:|^(FAIL|ERROR):" "$TLOG.node" "$TLOG.py" | head -12
+  echo "tests FAILED: not deploying (the gateway was not restarted)"
+  rm -f $FLAG "$TLOG" "$TLOG.node" "$TLOG.py"; systemctl --user start openclaw-team-drift.timer; exit 1
+fi
+rm -f "$TLOG" "$TLOG.node" "$TLOG.py"
+cd ~/openclaw-team
+# The owner's ids, hosts and bots are not in the archive: they live in ~/.config/openclaw-team/private.toml on this
+# host (the unpack above replaced the checkout). Without every value nothing renders, so stop before the gateway.
+step "render with the private values"
+if ! PERR=$(OPENCLAW_TEAM_PRIVATE= timeout 300 bin/team render 2>&1 >/dev/null); then
+  echo "$PERR" | tail -3
+  echo "render failed (cause above: a missing private value, or a file over the cap): not deploying; the gateway was not restarted"
+  rm -f $FLAG; systemctl --user start openclaw-team-drift.timer; exit 1
+fi
+echo "private values: complete"
+# Say so before the gateway goes away: a start on this host takes about 15 minutes, and silence reads as broken.
+step "announce"; timeout 60 bin/team notify "🔄 Restarting OpenClaw now to load an update (no task is running). It answers again in about 15 minutes; messages sent meanwhile are answered then." || echo "announce failed"
+step "stop gateway"; systemctl --user stop openclaw-gateway; for i in $(seq 1 40); do pgrep -f "[i]ndex.js gateway" >/dev/null || break; sleep 5; done; pgrep -f "[i]ndex.js gateway" && { pkill -9 -f "[i]ndex.js gateway"; sleep 3; }
+step "apply"; timeout 900 bin/team apply --skip-crons --no-restart-hint 2>&1 | tail -4; APPLY=${PIPESTATUS[0]}
+# apply (re)starts our timers, and an overdue timer runs at once: pause them again until the start is over.
+pause_timers
+step "start gateway"; systemctl --user reset-failed openclaw-gateway; systemctl --user start openclaw-gateway; START=$(date +%s)
+for i in $(seq 1 60); do journalctl --user -u openclaw-gateway.service --since "@$START" --no-pager | grep -q "http server listening" && break; sleep 15; done
+echo "listening after $(( $(date +%s) - START ))s"
+step "maintenance flag off; resume drift"; rm -f $FLAG; systemctl --user start openclaw-team-drift.timer; systemctl --user is-active openclaw-team-drift.timer
+# A refused apply leaves the host on the previous config: do not publish a version the host does not run.
+[ "$APPLY" = 0 ] || { echo "apply FAILED (exit $APPLY): not pushing; fix it and deploy again"; exit 1; }
+step "push"; bash ~/push.sh 2>&1 | grep -E "github main|push exit" | tail -5
+step "wait for agents"; sleep 660
+# The start is over: our timers run again before the check, which counts them (2026-11-14 it reported
+# "116/120" only because they were still paused).
+resume_timers
+step "verify"; VLOG=$(mktemp); timeout 900 bin/team verify >"$VLOG" 2>&1; tail -4 "$VLOG"
+timeout 60 bin/team notify "✅ OpenClaw is back after the update: $(grep -E "checks pass|FAIL" "$VLOG" | tail -1)" || echo "announce failed"; rm -f "$VLOG"
+echo DONE

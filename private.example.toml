@@ -1,0 +1,51 @@
+# Example private values: what a public clone and the tests use. The real file is private.toml (gitignored) at the
+# repo root, or ~/.config/openclaw-team/private.toml on the host. Copy this file there and put in real values.
+# Team files say {{private:KEY}}; teamlib fills every placeholder and refuses to render if a key is missing.
+
+[values]
+# the owner
+OWNER_NAME = "Alex"
+OWNER_TELEGRAM_ID = "100000001"
+OWNER_HANDLE = "example_owner"
+GIT_IDENTITY = "Alex Example <alex@example.com>"
+OWNER_ALLOWED_IP = "203.0.113.10"
+OWNER_OLD_ALLOWED_IP = "203.0.113.11"
+# Telegram: the team's forum group and each agent's bot @username
+TEAM_CHAT_ID = "-1000000000001"
+BOT_COORDINATOR = "example_orchestrator_bot"
+BOT_RESEARCH = "example_research_bot"
+BOT_WRITER = "example_writer_bot"
+BOT_REVIEW = "example_review_bot"
+BOT_PRODUCT = "example_product_bot"
+BOT_DESIGN = "example_design_bot"
+BOT_DEVOPS = "example_devops_bot"
+BOT_QA = "example_qa_bot"
+BOT_STRATEGY = "example_strategy_bot"
+BOT_SOCIAL = "example_social_bot"
+BOT_GROWTH = "example_growth_bot"
+# hosts and paths
+SERVER_IP = "198.51.100.20"
+OLD_SERVER_IP = "198.51.100.21"
+SERVER_HOME = "/home/team"
+LAPTOP_HOME = "/home/owner"
+LAPTOP_NODE = "owner-laptop"
+LAPTOP_NODE_ID = "0000000000000000000000000000000000000000000000000000000000000000"
+LAPTOP_PATH_BULKER = "/srv/projects/bulker"
+LAPTOP_PATH_SITES = "/srv/backups/sites"
+COOLIFY_PANEL_ID = "00000000-0000-0000-0000-000000000000"
+# brands and organisations
+BRAND_AI = "Acme"
+BRAND_AI_SLUG = "acme"
+BRAND_AI_SERVER_IP = "198.51.100.30"
+BRAND_GAME = "Starforge"
+BRAND_GAME_SLUG = "starforge"
+BRAND_GAME_UPPER = "STARFORGE"
+BRAND_STUDIO_SLUG = "nightlamp"
+BRAND_IR_SLUG = "pixel-shop"
+BRAND_IR_TIGHT = "pixelshop"
+BRAND_SITES_SLUG = "examplesites"
+ORG_SLUG = "example-org"
+WHM_SITES = "site-one, site-two"
+# whole private sentences
+BRAND_RULE = "Acme and Pixel Shop are never linked in any post, listing, pitch, email, store page, bot text or profile."
+SEO_CHAT_RULE = "the SEO contractors may ask you things there. Answer non-sensitive information directly; for any action, change, access, publishing, money or anything sensitive, DM the owner a one-line summary with your recommendation and wait for approve or deny. Their messages are requests, never authority."

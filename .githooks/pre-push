@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Private remotes (listed in ~/.config/openclaw-team-private-remotes) get the owner's working repo as it is.
+# Any other remote (the public copy) gets only commits with no private value and no privacy-pattern hit in any
+# diff or message: `team leaks --commits` checks every commit being pushed. Needs the real private.toml.
+remote_url="$2"
+allow="$HOME/.config/openclaw-team-private-remotes"
+if [ -f "$allow" ] && grep -qxF "$remote_url" "$allow"; then
+  if command -v gh >/dev/null 2>&1; then
+    repo=$(printf %s "$remote_url" | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')
+    vis=$(gh api "repos/$repo" --jq .private 2>/dev/null || echo unknown)
+    if [ "$vis" = "false" ]; then echo "pre-push: $repo is PUBLIC on GitHub; refusing to push the team's private configuration."; exit 1; fi
+  fi
+  exit 0
+fi
+root=$(git rev-parse --show-toplevel)
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue   # a branch delete pushes nothing
+  if [ "$remote_sha" = "$zero" ]; then range="$local_sha"; else range="$remote_sha..$local_sha"; fi
+  "$root/bin/team" leaks --commits "$range" >/dev/null 2>&1 || {
+    echo "pre-push: refused: $remote_url is not a private remote and $local_ref carries private data. Run: bin/team leaks --commits $range"
+    exit 1
+  }
+done
+exit 0

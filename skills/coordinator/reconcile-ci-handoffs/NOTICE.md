@@ -1,0 +1,1 @@
+Written by the agent itself through OpenClaw's Skill Workshop (Nov 2026), reviewed by the operator and adopted into the owner's repo on 2026-11-06. Only this repo version is loaded; the workshop is off.

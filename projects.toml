@@ -1,0 +1,95 @@
+# Project registry: name -> Telegram topic, paths, checks.
+# THE PROJECT-NAME CONTRACT: a project is named only by its `name` or one of its `aliases`, everywhere (board items,
+# briefs' Project lines, reports). The guard stores an alias as the name and refuses any other name. Add an alias
+# here (exact spelling) when the owner uses a new one; never invent names like "{{private:BRAND_AI}} SEO" or "team-wide".
+# server = clone on us-aihub (where the team runs); laptop = owner's laptop (node {{private:LAPTOP_NODE}}).
+
+[[projects]]
+name = "{{private:BRAND_GAME_SLUG}}"
+aliases = ["{{private:BRAND_STUDIO_SLUG}}", "{{private:BRAND_GAME_SLUG}}-infra", "{{private:BRAND_STUDIO_SLUG}}-site"]
+topic = 151
+server = "{{private:SERVER_HOME}}/projects/o"
+graph = ["{{private:BRAND_GAME_SLUG}}", "{{private:BRAND_GAME_SLUG}}-infra", "{{private:BRAND_STUDIO_SLUG}}-site"]   # repos in the code map (graphify), from origin's default branch
+laptop = "{{private:LAPTOP_HOME}}/Desktop/o"
+notes = "repos: {{private:BRAND_GAME_SLUG}}, {{private:BRAND_GAME_SLUG}}-art (laptop only), {{private:BRAND_GAME_SLUG}}-infra, {{private:BRAND_STUDIO_SLUG}}-site. Production: https://{{private:BRAND_GAME_SLUG}}.{{private:BRAND_STUDIO_SLUG}}.com on us-aihub."
+
+[[projects]]
+name = "{{private:BRAND_IR_SLUG}}"
+topic = 152
+server = "{{private:SERVER_HOME}}/projects/{{private:BRAND_IR_SLUG}}"
+graph = ["."]
+laptop = "{{private:LAPTOP_HOME}}/Desktop/{{private:BRAND_IR_SLUG}}"
+
+[[projects]]
+name = "ai"
+strict = true   # a common word: counts only when written as a project ("Project: ai", "#ai", "ai project")
+aliases = ["{{private:BRAND_AI_SLUG}}", "{{private:BRAND_AI_SLUG}}.cloud", "{{private:BRAND_AI_SLUG}}.com"]   # the owner's correction: "{{private:BRAND_AI}}" is this platform monorepo, never {{private:BRAND_AI_SLUG}}-hub
+topic = 153
+server = "{{private:SERVER_HOME}}/projects/ai"
+graph = ["backend", "frontend", "admin", "mobile", "packages", "infra", "monitoring"]
+laptop = "{{private:LAPTOP_HOME}}/Desktop/ai"
+notes = "monorepo: backend, frontend, admin, mobile, infra, monitoring, packages, docs, logos"
+
+[[projects]]
+name = "{{private:BRAND_AI_SLUG}}-hub"
+topic = 154
+server = "{{private:SERVER_HOME}}/projects/{{private:BRAND_AI_SLUG}}-hub"
+graph = ["."]
+laptop = "{{private:LAPTOP_HOME}}/Desktop/{{private:BRAND_AI_SLUG}}-hub"
+
+[[projects]]
+name = "bulker"
+topic = 155
+laptop = "{{private:LAPTOP_PATH_BULKER}}"
+
+[[projects]]
+name = "graph"
+strict = true   # a common word: counts only when written as a project ("Project: graph", "#graph", "graph project")
+topic = 156
+server = "{{private:SERVER_HOME}}/projects/graph"
+laptop = "{{private:LAPTOP_HOME}}/Desktop/graph"
+notes = "Python, Makefile"
+
+[[projects]]
+name = "android-myapp"
+topic = 157
+server = "{{private:SERVER_HOME}}/projects/android-myapp"
+laptop = "{{private:LAPTOP_HOME}}/AndroidStudioProjects/MyApplication"
+notes = "Gradle"
+
+[[projects]]
+name = "my-planner"
+topic = 158
+server = "{{private:SERVER_HOME}}/projects/my-planner"
+laptop = "{{private:LAPTOP_HOME}}/Desktop/my-planner"
+notes = "no git; live data stays on the laptop"
+
+[[projects]]
+name = "adam"
+strict = true   # a common word: counts only when written as a project ("Project: adam", "#adam", "adam project")
+topic = 159
+server = "{{private:SERVER_HOME}}/projects/adam"
+laptop = "{{private:LAPTOP_HOME}}/Desktop/adam"
+notes = "no git"
+
+[[projects]]
+name = "{{private:BRAND_SITES_SLUG}}-sites"
+aliases = ["{{private:BRAND_SITES_SLUG}}"]
+topic = 977
+server = "{{private:SERVER_HOME}}/projects/{{private:BRAND_SITES_SLUG}}/<site>"
+laptop = "{{private:LAPTOP_PATH_SITES}}"
+notes = "WHM backups ({{private:WHM_SITES}}); GitLab {{private:ORG_SLUG}}-tech/sites"
+
+[[projects]]
+name = "openclaw-ui"
+topic = 2715
+server = "{{private:SERVER_HOME}}/projects/openclaw-ui"
+graph = ["."]
+notes = "private GitHub farhadjafari385/openclaw-ui; fake data only; checks: build, lint, Playwright screenshots, pre-push secret scan"
+
+[[projects]]
+name = "team"
+strict = true   # a common word: counts only when written as a project ("Project: team", "#team", "team project")
+aliases = ["general", "openclaw-team", "openclaw-token-guard", "team-wide"]
+topic = 160
+notes = "team-wide work and anything that is not one project"

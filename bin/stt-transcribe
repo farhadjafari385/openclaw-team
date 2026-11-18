@@ -1,0 +1,20 @@
+#!/bin/bash
+# The owner's voice notes -> text, for OpenClaw's audio understanding (config tools.media, set by `team apply`).
+# 1. The laptop's GPU: Whisper large-v3-turbo, a few seconds, reached through the laptop's team-stt-tunnel on
+#    127.0.0.1:8765. It answers 503 while its card is busy with other work, and nothing answers while the laptop is off.
+# 2. Otherwise this server's CPU: Whisper small, greedy. Only a fallback: on 2026-11-14 a 9 s note took 88 s here
+#    under the team's build load, and the owner's voice notes failed against the old 90 s cap.
+set -u
+f="${1:-}"
+[ -r "$f" ] || { echo "usage: $0 <audio file>" >&2; exit 1; }
+out=$(curl -sf --connect-timeout 3 --max-time "${STT_NODE_TIMEOUT:-45}" -H 'Content-Type: application/octet-stream' \
+  --data-binary @"$f" "http://127.0.0.1:${STT_NODE_PORT:-8765}/transcribe" 2>/dev/null)
+if [ $? -eq 0 ] && [ -n "$out" ]; then printf '%s\n' "$out"; exit 0; fi
+echo "stt: the laptop GPU is not available; transcribing on this server's CPU" >&2
+exec "${STT_CPU_PYTHON:-/opt/stt-venv/bin/python}" - "$f" <<'PY'
+import sys
+from faster_whisper import WhisperModel
+m = WhisperModel("small", device="cpu", compute_type="int8", cpu_threads=4)
+segs, _ = m.transcribe(sys.argv[1], beam_size=1, vad_filter=True)
+print("".join(s.text for s in segs).strip())
+PY

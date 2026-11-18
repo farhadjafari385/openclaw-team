@@ -1,0 +1,271 @@
+# openclaw-team: the single source of truth for the agent team.
+# Edit here, then run `bin/team apply` on the host. Agents cannot change any of this.
+
+[team]
+name = "aihub"
+openclaw_home = "~/.openclaw"
+workspace_root = "~/.openclaw/workspace"
+token_guard_repo = "~/openclaw-token-guard"   # where the token-guard plugin is checked out on the host
+lock_files = true                              # chattr +i on generated files (needs passwordless sudo)
+
+[owner]
+name = "{{private:OWNER_NAME}}"
+telegram_id = "{{private:OWNER_TELEGRAM_ID}}"
+handle = "{{private:OWNER_HANDLE}}"          # Telegram @username, mentioned when a decision or approval is needed
+
+[telegram]
+chat_id = "{{private:TEAM_CHAT_ID}}"   # the team's forum group
+system_topic = 160           # Team / General: system notices and daily report
+default_topic = 160
+postmortem_topic = 2596
+secrets_dir = "~/.openclaw/secrets"
+
+[models]
+orchestrator = { primary = "anthropic/claude-opus-5-5", fallbacks = [], thinking = "medium" }   # owner 2026-11-17: never downgrade models to save tokens
+specialists  = { primary = "anthropic/claude-sonnet-5-5", fallbacks = [], thinking = "low" }   # owner 2026-11-13: Sonnet 5.5 or higher, never Sonnet 5
+spawn_allowed = [                  # owner 2026-11-17: never take Opus away to save tokens
+  "anthropic/claude-opus-5-5",
+  "anthropic/claude-sonnet-5-5",   # a retired version leaves this list; the guard moves its requests to the next one
+  "anthropic/claude-haiku-5-5",
+]
+spawn_thinking = ["off", "minimal", "low", "medium", "high"]
+
+[limits]
+bootstrap_max_chars = 34000      # generated AGENTS.md files stay well below this (raised 2026-11-09 for the pre-approval and user-path rules)
+remote_browser_timeout_ms = 120000 # OpenClaw hard-codes 1.5 s / 3 s for a remote browser; the laptop Team Chrome's link answers in 0.6-3 s, up to 9 s. Owner approved 120 s (2026-11-11). apply sets it.
+remote_browser_attach_ms = 30000 # OpenClaw tries the page attach (snapshot/click/navigate) for 5/7/9 s; the laptop Team Chrome needs 6.1-9.8 s (2026-11-14). apply sets 30 s, +15 s per retry.
+model_runtime_build_timeout_ms = 600000 # OpenClaw gives each agent's model setup a fixed 120 s at startup; it took 168-249 s here and the orchestrator stayed locked after three starts (2026-11-16). apply sets 10 min.
+mcp_defer_tools = true           # OpenClaw forces every tool schema into every model call (alwaysLoad: true); apply sets false so Claude Code loads a schema only when needed (2026-11-16: 1.2B cached reads a day, ~51k tokens before a task starts).
+cli_stable_system_prompt = true  # OpenClaw built the orchestrator's system prompt differently for the owner's messages, guard wakes, worker results and the web UI; each switch restarted its Claude process and re-cached the whole conversation (2026-11-17: 70 times in one session, ~1/3 of its cost). apply moves those per-run sections into the turn, where the model still reads them.
+voice_timeout_seconds = 180 # owner voice notes: the laptop GPU answers in seconds; the server CPU fallback took 88 s for a 9 s note under load (2026-11-14), so 90 s failed.
+telegram_cache_keep_days = 0      # OpenClaw's retained Telegram cache never expires and is loaded whole on the main thread (22k entries, 2026-11-14); apply trims it while the gateway is stopped
+worker_context_tokens = 100000       # a worker session compacts here (workers start at ~40k); Sonnet 5.5 had 1,000,000 by default (2026-11-14). 100k since 2026-11-17 (owner: cut the reads).
+orchestrator_context_tokens = 90000  # the orchestrator compacts here: it starts at ~46k and its conversation never resets (median call 113k, ~630M reads a day on 2026-11-15). 2026-11-17.
+max_concurrent_tasks = 10        # tasks running at once, whole team (owner 2026-11-10: 1-3 per agent by role; per agent: max_tasks)
+task_timeout_seconds = 3600
+task_budget_tokens = 15000000    # tokens one task may process before it must finish (the Claude CLI reports little usage)
+task_budget_calls = 100          # tool calls one task may make before it must finish (what actually stops a runaway task)
+orchestrator_run_calls = 60      # tool calls in one orchestrator run (a wake or an owner message); telling the owner stays allowed
+
+[pace]                           # the plan's weekly limit lasts the week (token-guard reads the CLI's usage every 10 min)
+enabled = false                  # off until the weekly reset (Fri 2026-11-21 02:00 UTC) or the owner's OK: at 95% used it would hold all dispatches now
+ahead_percent = 5                # how far ahead of an even 7-day pace the team may run
+reserve_percent = 97             # above this, only the owner's conversations run until the reset
+five_hour_percent = 95           # the 5-hour window: no new task at this until it resets
+
+[jobs]                           # anti-stall follow-ups (token-guard job tracker)
+stall_minutes = 30
+wake_after_end_minutes = 4
+idle_check_minutes = 30
+max_wakes_per_day = 48
+
+[triage]                         # owner's request: a cheap check that wakes the orchestrator with the right effort
+enabled = true
+every_minutes = 10               # at most this often, and only when something needs a decision (no tokens otherwise)
+model = "anthropic/claude-haiku-5-5"
+max_wakes_per_day = 24           # Opus wakes the triage may cause per day
+same_state_rewake_minutes = 180  # an unchanged board does not wake the orchestrator again within this time
+
+[board]                          # the task board (token-guard + oc-inbox)
+agent = "product"                # the PM: audits the board and may edit it
+audit_every_minutes = 180        # at most this often, and only when the board has problems
+topics = true                    # posts and replies go to the topic of the project they are about
+max_open = 20                    # the PM adds no items while this many are open (owner 2026-11-09: finish before adding)
+wip = 14                         # items in hand at once (owner 2026-11-10: 1-3 jobs per agent; 0 = no queue). 14 since 2026-11-16: items waiting in Review on CI held 6 of 10 slots while 69 waited in To do
+max_tasks_per_item = 10          # an item that has had this many tasks gets no more: what is left goes on small items (2026-11-15: items past 10 took 51% of all tasks and mostly never reached Done)
+# The owner's order (2026-11-06) for items the PM has not ranked: money first (the PM ranks those 1, 2, ...),
+# then {{private:BRAND_AI}} AI ({{private:BRAND_AI_SLUG}}.com), {{private:BRAND_AI}} Hub, {{private:BRAND_GAME}}, openclaw-ui, then team work.
+project_order = ["ai", "{{private:BRAND_AI_SLUG}}-hub", "{{private:BRAND_GAME_SLUG}}", "openclaw-ui", "team"]
+
+[ci]                             # the guard follows pipelines (workers report RESULT: waiting with the link)
+poll_seconds = 120
+max_wait_minutes = 150
+gitlab_token_file = "~/.openclaw/secrets/gitlab-pipeline-watch.token"   # read-only pipeline access
+github_token_file = "~/.openclaw/secrets/github-farhadjafari385.token"
+
+[sessions]                       # session clean-up (team gc, hourly)
+delete_finished_task_after_minutes = 30
+delete_idle_after_hours = 24
+
+[crons]                          # automations that must stay off (watchdogs burn tokens)
+disabled = ["openclaw-ui 10m stall check", "Daily team report", "Memory Dreaming Promotion"]
+
+[tool_trim]                      # tool definitions are re-sent on every model call (about 128k chars for a worker in
+                                 # 2026-11-06): leave out what an agent can never use on this headless server
+nobody = ["computer", "mobile_ui", "theme", "dashboard", "portal", "canvas", "terminal", "talk_voice", "tts",
+          "skill_workshop", "progress_card", "codex_threads", "codex_plugins", "codex_session_send", "codex_session_read",
+          "codex_sessions_list", "codex_session_interrupt", "codex_endpoint_probe"]
+workers = ["sessions_spawn", "sessions_send", "sessions", "automations", "cron", "ask_user", "message",
+           "conversations_send", "conversations_turn", "subagents", "agents_wait"]   # the guard blocks most of these for workers anyway
+
+# ---- MCP servers: tools from other programs (verified sources, versions pinned). Each agent lists the
+# ones it may use (mcp = [...]); every other agent gets a deny rule for that server's tools.
+[mcp.servers.devtools]       # Google's official Chrome DevTools: performance, console, network (Apache-2.0). QA only:
+                             # each session starts its own Chrome, and the server is short of memory (2026-11-06: 2.9 GB swap in use).
+                             # Playwright MCP was left out: agents already have OpenClaw's browser tool and Playwright via webapp-testing.
+command = "~/.openclaw/tools/node-v24.21.0/bin/npx"
+args = ["-y", "chrome-devtools-mcp@1.12.0", "--headless", "--isolated", "--usageStatistics=false", "--executablePath", "~/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome"]
+
+[mcp.servers.context7]       # Upstash Context7: current library documentation (MIT); sends library queries to Upstash
+url = "https://mcp.context7.com/mcp"
+transport = "streamable-http"
+
+# ---- agents ----
+# role = file in roles/, persona = file in personas/, bot = Telegram account id, handle = that bot's @username.
+# tools = OpenClaw tool policy for the agent (on top of token-guard).
+# task_budget_calls = tool calls one task of this agent may make (default: [limits] task_budget_calls).
+# max_tasks = tasks this agent may run at once (owner 2026-11-10: "between 1-3 jobs per agent, depends on the role").
+
+[[agents]]
+id = "coordinator"
+skills = ["healthcheck", "reconcile-ci-handoffs", "red-pipeline-triage", "{{private:BRAND_AI_SLUG}}-production-access"]   # the only skills this agent sees
+name = "Senior AI Orchestrator"
+emoji = "🧭"
+theme = "calm, accountable coordination"
+bot = "orchestrator"
+handle = "{{private:BOT_COORDINATOR}}"   # Telegram @username of that bot (checked by team verify)
+role = "orchestrator"
+tools = { profile = "full", alsoAllow = ["task_inbox"] }
+subagents = { allowAgents = ["researcher", "writer", "reviewer", "product", "designer", "devops", "qa", "strategy", "social", "growth"], delegationMode = "prefer" }
+
+[[agents]]
+id = "researcher"
+max_tasks = 1
+skills = ["rd-research-playbook", "browser-automation", "synthesize-research", "analyze", "statistical-analysis", "data-visualization", "explore-data"]   # the only skills this agent sees
+name = "Senior Staff R&D"
+emoji = "🔎"
+theme = "curious, evidence-led research"
+bot = "research"
+handle = "{{private:BOT_RESEARCH}}"   # Telegram @username of that bot (checked by team verify)
+role = "researcher"
+tools = { profile = "full" }
+
+[[agents]]
+id = "writer"
+max_tasks = 2
+skills = ["software-engineering-playbook", "frontend-design", "webapp-testing", "browser-automation", "node-inspect-debugger", "python-debugpy", "verification-before-completion", "systematic-debugging", "test-driven-development", "using-git-worktrees", "receiving-code-review", "ui-ux-pro-max", "interface-design", "emil-design-eng", "design-taste-frontend", "impeccable", "architecture", "system-design", "documentation", "tech-debt", "sql-queries"]   # the only skills this agent sees
+mcp = ["context7"]   # MCP servers this agent may use
+name = "Senior Staff Software Engineer"
+emoji = "⚙️"
+theme = "careful, minimal-diff implementation"
+bot = "writer"
+handle = "{{private:BOT_WRITER}}"   # Telegram @username of that bot (checked by team verify)
+role = "writer"
+tools = { profile = "full" }
+
+[[agents]]
+id = "reviewer"
+max_tasks = 1
+skills = ["team-lead-review-playbook", "pull-request-review-evidence", "webapp-testing", "browser-automation", "verification-before-completion", "systematic-debugging", "using-git-worktrees", "code-review", "testing-strategy", "tech-debt"]   # the only skills this agent sees
+mcp = ["context7"]   # MCP servers this agent may use
+name = "Senior Staff Team Lead"
+emoji = "🔍"
+theme = "careful, independent review"
+bot = "review"
+handle = "{{private:BOT_REVIEW}}"   # Telegram @username of that bot (checked by team verify)
+role = "reviewer"
+tools = { profile = "full", deny = ["Edit", "Write"] }
+
+[[agents]]
+id = "product"
+max_tasks = 1
+skills = ["product-management-playbook", "write-spec", "roadmap-update", "sprint-planning", "competitive-brief", "synthesize-research", "metrics-review", "stakeholder-update", "product-brainstorming", "user-research", "customer-research"]   # the only skills this agent sees
+name = "Senior Staff Product Manager"
+emoji = "📦"
+theme = "outcome-focused product thinking"
+bot = "product"
+handle = "{{private:BOT_PRODUCT}}"   # Telegram @username of that bot (checked by team verify)
+role = "product"
+tools = { profile = "full", deny = ["gateway"], alsoAllow = ["task_inbox"] }
+
+[[agents]]
+id = "designer"
+max_tasks = 1
+skills = ["product-design-playbook", "frontend-design", "webapp-testing", "browser-automation", "verification-before-completion", "ui-ux-pro-max", "interface-design", "emil-design-eng", "break-ui", "design-taste-frontend", "impeccable", "accessibility-review", "design-critique", "design-handoff", "design-system", "ux-copy", "canvas-design", "theme-factory"]   # the only skills this agent sees
+name = "Senior Staff Product Designer"
+emoji = "🎨"
+theme = "precise, realistic UX and visual design"
+bot = "designer"
+handle = "{{private:BOT_DESIGN}}"   # Telegram @username of that bot (checked by team verify)
+role = "designer"
+tools = { profile = "full" }
+
+[[agents]]
+id = "devops"
+max_tasks = 2
+skills = ["devsecops-playbook", "{{private:BRAND_AI_SLUG}}-production-access", "healthcheck", "verification-before-completion", "systematic-debugging", "test-driven-development", "using-git-worktrees", "deploy-checklist", "incident-response"]   # the only skills this agent sees
+mcp = ["context7"]   # MCP servers this agent may use
+name = "Senior Staff DevSecOps Engineer"
+emoji = "🛡️"
+theme = "careful infrastructure and security"
+bot = "devops"
+handle = "{{private:BOT_DEVOPS}}"   # Telegram @username of that bot (checked by team verify)
+role = "devops"
+tools = { profile = "full" }
+
+[[agents]]
+id = "qa"
+max_tasks = 2
+skills = ["qa-engineering-playbook", "webapp-testing", "browser-automation", "verification-before-completion", "systematic-debugging", "break-ui", "testing-strategy", "accessibility-review"]   # the only skills this agent sees
+mcp = ["devtools"]   # MCP servers this agent may use
+name = "Senior Staff QA Engineer"
+emoji = "🧪"
+theme = "thorough, reproducible testing"
+bot = "qa"
+handle = "{{private:BOT_QA}}"   # Telegram @username of that bot (checked by team verify)
+role = "qa"
+tools = { profile = "full" }
+
+[[agents]]
+id = "strategy"
+max_tasks = 1
+skills = ["market-strategy-playbook", "browser-automation", "pricing", "paywalls", "offers", "competitors", "competitor-profiling", "customer-research", "marketing-plan", "product-marketing", "revops", "churn-prevention", "analyze", "statistical-analysis", "data-visualization"]   # the only skills this agent sees
+name = "Senior Staff Market & Strategy Analyst"
+emoji = "📈"
+theme = "evidence-led market and strategy analysis"
+bot = "strategy"
+handle = "{{private:BOT_STRATEGY}}"   # Telegram @username of that bot (checked by team verify)
+role = "strategy"
+tools = { profile = "full", deny = ["exec", "process", "gateway"] }
+
+[[agents]]
+id = "social"
+max_tasks = 2
+skills = ["social-media-playbook", "browser-automation", "social", "copywriting", "copy-editing", "content-strategy", "image", "video", "launch", "marketing-psychology", "ad-creative", "content-creation", "draft-content", "brand-review", "campaign-plan", "canvas-design", "theme-factory"]   # the only skills this agent sees
+name = "Senior Staff Social Media Manager"
+emoji = "📣"
+theme = "consistent, on-brand social presence"
+bot = "social"
+handle = "{{private:BOT_SOCIAL}}"   # Telegram @username of that bot (checked by team verify)
+role = "social"
+tools = { profile = "full", deny = ["gateway"] }   # shell + laptop browser: owner 2026-11-09
+task_budget_calls = 300   # browser work: one site takes 15-20 calls; at 100 one task posted once and stopped
+
+[[agents]]
+id = "growth"
+max_tasks = 3
+skills = ["growth-community-playbook", "browser-automation", "seo-audit", "ai-seo", "schema", "programmatic-seo", "site-architecture", "cro", "signup", "popups", "onboarding", "analytics", "conversion-tracking", "attribution", "ab-testing", "emails", "lead-magnets", "launch", "referrals", "marketing-loops", "free-tools", "link-building", "community-marketing", "aso", "email-sequence", "performance-report"]   # the only skills this agent sees
+name = "Senior Staff Growth & Community Manager"
+emoji = "🌐"
+theme = "steady, honest, compliant growth"
+bot = "growth"
+handle = "{{private:BOT_GROWTH}}"   # Telegram @username of that bot (checked by team verify)
+role = "growth"
+tools = { profile = "full", deny = ["gateway"] }   # shell + laptop browser: owner 2026-11-09
+task_budget_calls = 300   # browser work: one site takes 15-20 calls; at 100 one task listed once and stopped
+
+[graphs]
+# Code maps (graphify) for every project with `graph` repos in projects.toml: built from origin's default
+# branch every 30 minutes (`team graphs`), tree-sitter only (no AI calls). The guard makes every task in
+# such a project query its map before it searches or reads code. Change `version` to upgrade graphify.
+version = "0.9.104"
+root = "~/graphs"                       # ~/graphs/<project>/graphify-out/graph.json
+budget = 1500                           # token cap of one map query
+
+# Browsers the agents may attach to (OpenClaw browser.profiles, attach-only: OpenClaw never launches them).
+# laptop = the owner's "Team Chrome" on {{private:LAPTOP_NODE}} (own profile, logged into the owner's accounts the team
+# needs), reached through an SSH tunnel to the server's loopback (laptop user services team-chrome and
+# team-chrome-tunnel). Owner 2026-11-09: give the team the laptop browser; OpenClaw has no browser-only grant
+# for the node browser (it needs operator.admin, which would also open exec on the laptop).
+[browser_profiles.laptop]
+cdp_url = "http://127.0.0.1:19222"
