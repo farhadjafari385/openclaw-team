@@ -4,13 +4,18 @@ The single source of truth for an OpenClaw agent team: who the agents are, the r
 projects they work on, their skills and tools, and the policy that enforces it all. Agents cannot change
 any of it; the host is rebuilt from this repo and checked against it every 15 minutes.
 
+This is the public copy of a team that runs in production. It holds no private data: every id, host, path,
+bot name and brand is a `{{private:KEY}}` placeholder filled from a file that never enters git (see
+[Private values](#private-values)). Clone it, copy `private.example.toml`, fill in your own values, and the
+same code runs your team.
+
 Three repos work together:
 
 | Repo | Role |
 |---|---|
 | **openclaw-team** (this one) | Team definition: agents, personas, rules, projects, facts, skills, MCP tools. `bin/team` renders, installs, locks, verifies, reports; `bin/deploy` rolls a change out safely. |
 | [openclaw-token-guard](https://github.com/farhadjafari385/openclaw-token-guard) (public) | The OpenClaw plugin that enforces the rules on every tool call, keeps the task board, follows every task to the end, names the right skills in every brief, and writes the team's Telegram threads. |
-| openclaw-ui | Team HQ, the team's own web UI (built by the agents). |
+| openclaw-ui (private) | Team HQ, the team's own web UI (built by the agents). |
 
 ## Private values
 
@@ -35,6 +40,18 @@ values written inline. A missing file or key is refused by name; nothing is ever
   `git config core.hooksPath .githooks`.
 - **Change a value:** edit `private.toml`, copy it to the host's `~/.config/openclaw-team/private.toml`, then
   `bin/team apply`.
+- **Too long with real values:** real values are longer than the fake ones, so a generated `AGENTS.md` can pass
+  the tests with the example and still go over the size cap. The tests also render with your real
+  `private.toml` when one is present, and `bin/deploy` renders with it before it touches the gateway.
+
+## Public and private repos
+
+The owner works in a private repo (`openclaw-team-private`) whose history predates the placeholders. This public
+repo shares no history with it: each publish is one new commit holding the private repo's current tree, and it
+goes out only after `bin/team leaks` (the tree) and `bin/team leaks --commits` (the new commit) both find nothing
+with the real values loaded. The pre-push hook runs the same check again, because this remote is not listed as
+private. Pull requests and issues are welcome here; accepted changes are applied in the private repo and come
+back with the next publish.
 
 ## Install on a host
 
@@ -130,7 +147,14 @@ bin/team drift [--fix] [--notify]
 bin/team report [--send]
 bin/team gc [--all]              delete finished and idle sessions
 bin/team reset --yes             one-time clean slate (archives memory and boards, deletes all sessions)
+bin/team leaks [--commits A..B]  refuse if any private value or privacy pattern is in the tree or those commits
 bin/deploy --pull | <tgz>...     the safe rollout
 ```
 
-Tests: `python3 -m unittest discover -s tests`.
+Tests: `python3 -m unittest discover -s tests` (they use `private.example.toml`, so a fresh clone passes; with a
+real `private.toml` present they also check the real render).
+
+## License
+
+No license file yet: until the owner picks one, the code is visible but not licensed for reuse. Each skill in
+`vendor-skills/` keeps its own `LICENSE` and `NOTICE.md`.
