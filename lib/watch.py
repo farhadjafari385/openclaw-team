@@ -28,7 +28,7 @@ def last_status_ts(item, status):
     """When the item last entered `status`, from its history (0 if never)."""
     ts = 0.0
     for h in item.get("history") or []:
-        if h.get("status") == status:
+        if (h.get("to") or h.get("status")) == status:  # oc-inbox history rows say "to"
             ts = max(ts, parse_ts(h.get("ts")))
     return ts
 
@@ -78,7 +78,7 @@ def recent_spawns(jobs_state, since_ms):
 
 
 def running(jobs_state):
-    return [j for j in (jobs_state.get("jobs") or {}).values() if j.get("status") not in ("ended", "lost", "killed", "done")]
+    return [j for j in (jobs_state.get("jobs") or {}).values() if j.get("status") == "running"]
 
 
 def watchdog(items, jobs_state, now, gateway_ok, disk_pct, held=()):

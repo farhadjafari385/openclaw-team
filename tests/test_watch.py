@@ -15,7 +15,7 @@ def iso(ts):
 
 def item(i, status, project="ai", note="", hist=(), prio="normal", updated=None):
     return {"id": i, "status": status, "project": project, "title": f"title {i}", "priority": prio, "note": note,
-            "history": [{"status": s, "ts": iso(t), "note": n} for s, t, n in hist],
+            "history": [{"to": s, "ts": iso(t), "note": n} for s, t, n in hist],
             "updated_ts": iso(updated if updated is not None else NOW - 60)}
 
 
@@ -44,7 +44,8 @@ class Watchdog(unittest.TestCase):
     def test_no_idle_alert_when_a_task_started_or_runs(self):
         items = [item("t1", "todo")]
         started = {"jobs": {"x": {"status": "ended", "spawnedAt": (NOW - 600) * 1000}}}
-        runs = {"jobs": {"x": {"status": "running", "spawnedAt": (NOW - 5 * 3600) * 1000}}}
+        runs = {"jobs": {"x": {"status": "running", "spawnedAt": (NOW - 5 * 3600) * 1000}, "y": {"status": "interrupted"}}}
+        self.assertEqual(len(watch.running(runs)), 1, "an interrupted job is not running")
         self.assertEqual(watch.watchdog(items, started, NOW, True, 50.0), [])
         self.assertEqual(watch.watchdog(items, runs, NOW, True, 50.0), [])
 
