@@ -44,14 +44,14 @@ values written inline. A missing file or key is refused by name; nothing is ever
   the tests with the example and still go over the size cap. The tests also render with your real
   `private.toml` when one is present, and `bin/deploy` renders with it before it touches the gateway.
 
-## Public and private repos
+## One repo
 
-The owner works in a private repo (`openclaw-team-private`) whose history predates the placeholders. This public
-repo shares no history with it: each publish is one new commit holding the private repo's current tree, and it
-goes out only after `bin/team leaks` (the tree) and `bin/team leaks --commits` (the new commit) both find nothing
-with the real values loaded. The pre-push hook runs the same check again, because this remote is not listed as
-private. Pull requests and issues are welcome here; accepted changes are applied in the private repo and come
-back with the next publish.
+Since 2026-11-21 this public repo is the team's only source of truth: the host's checkout is a clone of it,
+`bin/deploy` pushes here (`bin/push`), and the older private repo is no longer used. Private values never enter
+git: they live in an untracked `private.toml` (`~/.config/openclaw-team/private.toml` on the host and the
+owner's laptop, gitignored here), which `render`, `apply` and `deploy` read locally. Every commit and push runs
+`bin/team leaks` (the tree) and `bin/team leaks --commits` (the new commits) with the real values loaded, and
+refuses on any hit. Pull requests and issues are welcome.
 
 ## Install on a host
 

@@ -261,7 +261,7 @@ task_budget_calls = 300   # browser work: one site takes 15-20 calls; at 100 one
 [watch]                         # bin/team watch, every 5 minutes (owner 2026-11-21: "make them live")
 held_projects = ["openclaw-ui", "{{private:BRAND_GAME_SLUG}}"]   # owner hold of 2026-11-16: no work, not counted as idle
 asks_file = "~/.openclaw/workspace/coordinator/owner-asks.md"
-page = "~/progress/index.html"
+page = "/srv/team-pages/progress/index.html"   # served at https://chat.{{private:BRAND_AI_SLUG}}.cloud/progress/ behind its basic auth (nginx: /srv/edge/extra/<that host>.conf)
 digest_hour_utc = 7
 
 [graphs]

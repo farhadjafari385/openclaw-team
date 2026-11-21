@@ -1,0 +1,20 @@
+#!/bin/bash
+# Push the deployed versions to GitHub with the privacy hooks (owner 2026-11-21: the PUBLIC openclaw-team is the
+# only team repo; the private openclaw-team-private is never pushed to or pulled from again).
+# token-guard -> github.com/farhadjafari385/openclaw-token-guard main; openclaw-team -> github.com/farhadjafari385/openclaw-team main.
+# Both pre-push hooks run their leak checks; a hit refuses the push. Tokens never touch argv or URLs.
+set -u
+SEC=~/.openclaw/secrets
+ASK=$(mktemp); chmod 700 "$ASK"; trap 'rm -f "$ASK"' EXIT
+printf '#!/bin/sh\ncase "$1" in *sername*) echo farhadjafari385;; *) cat %s/github-farhadjafari385.token;; esac\n' "$SEC" > "$ASK"
+export GIT_ASKPASS=$ASK GIT_TERMINAL_PROMPT=0
+push() {  # <checkout> <public url>
+  cd "$1" || { echo "push exit=1 ($1 missing)"; return; }
+  git config core.hooksPath .githooks
+  git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$2" || git remote add origin "$2"
+  echo "== $(basename "$1") $(git log --oneline -1)"
+  timeout 240 git push origin HEAD:main 2>&1 | grep -vE "^remote: *$" | tail -4; echo "push exit=${PIPESTATUS[0]}"
+  echo "github main: $(git ls-remote origin refs/heads/main | cut -c1-7)"
+}
+push ~/openclaw-token-guard https://github.com/farhadjafari385/openclaw-token-guard.git
+push ~/openclaw-team https://github.com/farhadjafari385/openclaw-team.git

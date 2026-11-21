@@ -139,7 +139,7 @@ def render_page(items, jobs_state, now, usage="", held=()):
             h += "<tr>" + "".join(f"<td>{esc(str(c))}</td>" for c in r) + "</tr>"
         return h + "</table>"
 
-    parts = [f"<h1>Team progress</h1><p class=meta>Updated {stamp} · {esc(usage)} · refreshes every 5 min</p>",
+    parts = [f"<h1>Team progress</h1><p class=meta>Updated {stamp} · {esc(usage)} · data every 5 min, page reloads every 60 s</p>",
              "<div class=kpi>" + "".join(f"<div><b>{n}</b> {k}</div>" for k, n in (
                  ("done in 24 h", len(done24)), ("in progress", len(doing)), ("to do", len(todo)),
                  ("blocked", counts.get("blocked", 0)), ("tasks running", len(run)),
@@ -157,7 +157,7 @@ def render_page(items, jobs_state, now, usage="", held=()):
            "th{background:#f1f1f1}.kpi{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0}.kpi div{padding:6px 10px;border:1px solid #8884;border-radius:8px}"
            ".meta{color:#888}")
     return (f"<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            f"<meta http-equiv=refresh content=120><title>Team progress</title><style>{css}</style></head><body>{''.join(parts)}</body></html>")
+            f"<meta http-equiv=refresh content=60><title>Team progress</title><style>{css}</style></head><body>{''.join(parts)}</body></html>")
 
 
 def cost_24h(jobs_state, items, now, held=()):

@@ -135,7 +135,7 @@ echo "listening after $(( $(date +%s) - START ))s"
 step "maintenance flag off; resume drift"; rm -f $FLAG; systemctl --user start openclaw-team-drift.timer; systemctl --user is-active openclaw-team-drift.timer
 # A refused apply leaves the host on the previous config: do not publish a version the host does not run.
 [ "$APPLY" = 0 ] || { echo "apply FAILED (exit $APPLY): not pushing; fix it and deploy again"; exit 1; }
-step "push"; bash ~/push.sh 2>&1 | grep -E "github main|push exit" | tail -5
+step "push"; bash bin/push 2>&1 | grep -E "github main|push exit" | tail -5
 step "wait for agents"; sleep 660
 # The start is over: our timers run again before the check, which counts them (2026-11-14 it reported
 # "116/120" only because they were still paused).
