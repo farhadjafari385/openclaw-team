@@ -97,8 +97,15 @@ step "unpack"
 if [ -n "$PULL" ]; then
   for r in openclaw-token-guard openclaw-team; do git -C ~/$r pull --ff-only || { echo "git pull failed in $r: not deploying"; rm -f $FLAG; systemctl --user start openclaw-team-drift.timer; exit 1; }; done
 fi
-[ -n "$TG" ] && { rm -rf ~/openclaw-token-guard && tar xzf "$TG" -C ~ && rm -f "$TG"; }
-[ -n "$TEAM" ] && { rm -rf ~/openclaw-team && tar xzf "$TEAM" -C ~ && rm -f "$TEAM"; }
+# An archive has no .git: keep the checkout's history across the unpack, or the push step below has nothing to push
+# (2026-11-21: three deploys in a row ended "push exit=128 / not a git repository").
+unpack() {  # <archive> <dir>
+  local keep=""; [ -d ~/$2/.git ] && { keep=$(mktemp -d); mv ~/$2/.git "$keep/"; }
+  rm -rf ~/$2 && tar xzf "$1" -C ~ && rm -f "$1"
+  [ -n "$keep" ] && { rm -rf ~/$2/.git; mv "$keep/.git" ~/$2/.git; rmdir "$keep"; }
+}
+[ -n "$TG" ] && unpack "$TG" openclaw-token-guard
+[ -n "$TEAM" ] && unpack "$TEAM" openclaw-team
 for r in openclaw-token-guard openclaw-team; do (cd ~/$r && git config core.hooksPath .githooks && echo "$r $(git log --oneline -1)"); done
 # The tests gate the deploy: a failure stops it here, before the gateway is touched. (On 2026-11-07 a
 # deploy printed "fail 1" and went on.)
