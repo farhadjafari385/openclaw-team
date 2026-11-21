@@ -49,16 +49,19 @@ task_budget_calls = 100          # tool calls one task may make before it must f
 orchestrator_run_calls = 60      # tool calls in one orchestrator run (a wake or an owner message); telling the owner stays allowed
 
 [pace]                           # the plan's weekly limit lasts the week (token-guard reads the CLI's usage every 10 min)
-enabled = true                   # on again after the 2026-11-21 reset: off, the team spent the week by mid-week and stood idle 2 days
-ahead_percent = 5                # how far ahead of an even 7-day pace the team may run
-reserve_percent = 85             # owner 2026-11-21 (cost): above 85% of the week, only the owner's conversations run
-five_hour_percent = 85           # owner 2026-11-21 (cost): no new task above 85% of the 5-hour window
-# Owner 2026-11-21 11:45 UTC: "at most ~14% of the weekly limit over the next 12 hours; ~8% is used": weekly use may
-# grow 0.5 point per hour from 8%. Above that, new dispatches wait (one Telegram note); the owner's chats still run.
-window_start = "2026-11-21T11:45:00Z"
-window_start_percent = 8
-window_per_hour = 0.5
-window_hours = 12
+enabled = true
+# Owner 2026-11-21 21:00 UTC: "Why did the agents stop at 14%? Stopping is NOT the way to save tokens. Let them use the
+# correct model/effort, subagents, parallel tasks, clear/compact/delete sessions." The 12-hour budget window and the
+# even-pace hold are gone; the only stop is near the weekly cap. Savings come from model/effort per brief, Subagents
+# lines, parallel tasks and session clean-up ([sessions], *_context_tokens).
+ahead_percent = 100              # no even-pace hold: the team may use the week's allowance as fast as the work needs
+reserve_percent = 95             # owner's long-standing stop: above 95% of the week, only the owner's conversations run
+five_hour_percent = 95           # a task started above this would hit the 5-hour cap halfway
+
+[loop]                           # gateway event-loop watch (token-guard loopwatch): a launch waits only on a real block
+lag_ms = 8000                    # 3000 held every launch for hours at load 6/6 cores (2026-11-21: 74 refusals in 3 h)
+calm_ms = 60000
+max_hold_ms = 180000
 
 [jobs]                           # anti-stall follow-ups (token-guard job tracker)
 stall_minutes = 30
@@ -95,6 +98,7 @@ github_token_file = "~/.openclaw/secrets/github-farhadjafari385.token"
 [sessions]                       # session clean-up (team gc, hourly)
 delete_finished_task_after_minutes = 30
 delete_idle_after_hours = 24
+delete_cli_transcripts_after_days = 14   # owner 2026-11-21: delete old sessions (Claude CLI transcripts + subagent logs of team agents)
 
 [crons]                          # automations that must stay off (watchdogs burn tokens)
 disabled = ["openclaw-ui 10m stall check", "Daily team report", "Memory Dreaming Promotion"]

@@ -368,6 +368,11 @@ def guard_config(team, projects, live, mirror=True):
         },
         # Weekly pace (2026-11-17: the Max plan's weekly limit was 95% used 3.5 days into the week): ahead of an
         # even pace, dispatches and the guard's wakes wait; the owner's conversations always run.
+        "loop": {
+            "lagMs": int(team.get("loop", {}).get("lag_ms", 8000)),
+            "calmMs": int(team.get("loop", {}).get("calm_ms", 60000)),
+            "maxHoldMs": int(team.get("loop", {}).get("max_hold_ms", 180000)),
+        },
         "pace": {
             "enabled": bool(team.get("pace", {}).get("enabled", True)),
             "aheadPercent": int(team.get("pace", {}).get("ahead_percent", 5)),
@@ -1829,6 +1834,36 @@ def cmd_gc(args):
             failed += 1
             print(f"  reset {key}: {(res.stderr or res.stdout).strip()[-160:]}")
     print(f"sessions: {len(rows)}; deleted {deleted}, reset {reset} main, failed {failed}{' (dry run)' if args.dry_run else ''}; kept {len(rows) - len(victims)}")
+    days = int(conf.get("delete_cli_transcripts_after_days", 14))
+    old = old_cli_transcripts(HOME / ".claude" / "projects", datetime.datetime.now().timestamp(), days)
+    freed = 0
+    for f in old:
+        if args.dry_run:
+            continue
+        try:
+            freed += os.path.getsize(f)
+            os.remove(f)
+        except OSError:
+            pass
+    print(f"cli transcripts older than {days} d: {len(old)} {'would be ' if args.dry_run else ''}removed ({freed // 1048576} MB)")
+
+
+def old_cli_transcripts(root, now_s, days):
+    """Claude CLI transcripts of team agents (and their subagents' logs) untouched for `days`: they are re-read by
+    nothing once a task is over and only grow (owner 2026-11-21: delete old sessions). Audit data lives elsewhere
+    (board history, token-guard state, telegram cache), so these can go."""
+    out = []
+    if days <= 0:
+        return out
+    cut = now_s - days * 86400
+    for proj in glob.glob(str(Path(root) / "*openclaw-workspace-*")):
+        for f in glob.glob(proj + "/**/*.jsonl", recursive=True):
+            try:
+                if os.path.getmtime(f) < cut:
+                    out.append(f)
+            except OSError:
+                pass
+    return out
 
 
 # ---------------------------------------------------------------- reset (one-time clean slate)
