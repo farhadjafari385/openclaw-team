@@ -169,6 +169,17 @@ def cost_24h(jobs_state, items, now, held=()):
     return toks, done, (toks // done if done else None)
 
 
+def verdicts_24h(jobs_state, now):
+    """What tasks that ended in 24 h delivered (the guard's `verdict`, not the run's `outcome`, which says "ok" for a
+    blocked task: 2026-11-21 audit, 63 jobs "ok", 27 of 35 ends not done)."""
+    since = (now - 86400) * 1000
+    c = Counter()
+    for j in (jobs_state.get("jobs") or {}).values():
+        if (j.get("endedAt") or 0) >= since:
+            c[j.get("verdict") or "unrecorded"] += 1
+    return c
+
+
 def digest_text(items, asks, now, held=(), jobs_state=None):
     live = [i for i in items if i.get("project") not in held]
     done24 = done_since(live, now - 86400)
@@ -176,6 +187,9 @@ def digest_text(items, asks, now, held=(), jobs_state=None):
     if jobs_state is not None:
         toks, done, per = cost_24h(jobs_state, items, now, held)
         lines.append(f"Cost: {toks / 1e6:.1f}M worker tokens in 24 h, " + (f"{per / 1e6:.1f}M per item done." if per else "no item done (all of it was spend without a result)."))
+        v = verdicts_24h(jobs_state, now)
+        if v:
+            lines.append("Task ends: " + ", ".join(f"{k} {n}" for k, n in v.most_common()))
     for i in done24[:10]:
         lines.append(f"✅ {i['id']} {i.get('title', '')[:70]}")
     if asks:

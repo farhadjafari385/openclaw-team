@@ -104,6 +104,8 @@ class Cost(unittest.TestCase):
         self.assertEqual(watch.cost_24h(jobs, items, NOW), (3_000_000, 2, 1_500_000))
         self.assertIn("1.5M per item done", watch.digest_text(items, [], NOW, (), jobs))
         self.assertIn("no item done", watch.digest_text([], [], NOW, (), jobs))
+        jobs["jobs"]["a"]["verdict"] = "blocked"
+        self.assertIn("Task ends: blocked 1", watch.digest_text(items, [], NOW, (), jobs))
 
 
 if __name__ == "__main__":
