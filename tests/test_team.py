@@ -173,7 +173,7 @@ class BoardTopicsSessionsTest(unittest.TestCase):
         g = teamlib.guard_config(self.team, self.projects, LIVE)
         self.assertEqual(g["jobs"]["budgetCalls"], 100)
         self.assertEqual(g["orchestratorMaxCallsPerRun"], 60)
-        self.assertEqual(g["triage"]["maxWakesPerDay"], 24)
+        self.assertEqual(g["triage"]["maxWakesPerDay"], 12)  # owner 2026-11-21 budget
         self.assertEqual(g["triage"]["sameStateRewakeMinutes"], 180)
 
     def test_up_to_10_items_at_once_in_the_owners_project_order_and_ci_followed_by_the_guard(self):
