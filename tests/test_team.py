@@ -94,8 +94,11 @@ class ConfigTest(unittest.TestCase):
         d = teamlib.desired_config(self.team, self.projects, LIVE)
         e = d["agents"]["entries"]
         guard = d["plugins"]["entries"]["token-guard"]["config"]
-        self.assertIn(guard["pace"]["enabled"], (True, False))  # the weekly limit lasts the week (2026-11-17); on after the reset
-        self.assertEqual(guard["pace"]["reservePercent"], 97)
+        self.assertIs(guard["pace"]["enabled"], True)  # the weekly limit lasts the week; off, the team spent it by mid-week (2026-11-21)
+        self.assertEqual(guard["pace"]["reservePercent"], 85)  # owner 2026-11-21 (cost): hard stop at 85%
+        self.assertEqual(guard["pace"]["fiveHourPercent"], 85)
+        self.assertEqual(guard["board"]["maxNoProgress"], 2)
+        self.assertIs(guard["board"]["requireDoneWhen"], True)
         self.assertIn("anthropic/claude-opus-5-5", guard["spawn"]["allowedModels"])  # owner: never downgrade to save tokens
         self.assertEqual(e["coordinator"]["model"]["primary"], "anthropic/claude-opus-5-5")  # owner: never downgrade to save tokens
         self.assertEqual(e["coordinator"]["thinkingDefault"], "medium")
@@ -248,6 +251,14 @@ class BoardTopicsSessionsTest(unittest.TestCase):
         self.assertEqual((sub["maxConcurrent"], sub["maxChildrenPerAgent"]), (total, total))  # OpenClaw lets the guard decide
         e = teamlib.desired_config(self.team, self.projects, LIVE, mirror=False)["agents"]["entries"]
         self.assertNotIn("max_tasks", e["growth"])  # a guard setting, not an OpenClaw one
+
+    def test_exec_commands_stay_in_the_foreground_for_two_minutes(self):
+        # OpenClaw's default is 10 s, then the model polls (one full-context call per poll); its maximum is 120 s.
+        self.assertEqual(int(self.team["limits"]["exec_background_ms"]), 120000)
+        live = {"tools": {"exec": {"host": "auto", "mode": "full"}, "web": {"x": 1}}}
+        t = teamlib.desired_config(self.team, self.projects, live, mirror=False)["tools"]
+        self.assertEqual(t["exec"], {"host": "auto", "mode": "full", "backgroundMs": 120000})
+        self.assertEqual(t["web"], {"x": 1})
 
     def test_the_remote_browser_timeouts_are_raised_in_openclaw_and_checked(self):
         # 2026-11-11: OpenClaw hard-codes 1.5 s / 3 s for a remote browser; the laptop Team Chrome answers in 0.6-3 s.
@@ -614,13 +625,13 @@ class VoiceNotesTest(unittest.TestCase):
         live = dict(LIVE, tools={"profile": "full", "exec": {"host": "gateway"}, "media": {"models": [{"command": "/old"}]}})
         tools = teamlib.desired_config(self.team, self.projects, live)["tools"]
         self.assertEqual(tools["profile"], "full")
-        self.assertEqual(tools["exec"], {"host": "gateway"})
+        self.assertEqual(tools["exec"], {"host": "gateway", "backgroundMs": 120000})  # the rest of exec stays as it is
         model = tools["media"]["models"][0]
         self.assertEqual(model["command"], str(teamlib.REPO / "bin" / "stt-transcribe"))
         self.assertEqual(model["args"], ["{{AttachmentPath}}"])
         self.assertGreaterEqual(model["timeoutSeconds"], 150)
         patch = teamlib.build_patch(live, teamlib.desired_config(self.team, self.projects, live))
-        self.assertEqual(set(patch.get("tools", {})), {"media"})  # nothing else under tools changes
+        self.assertEqual(set(patch.get("tools", {})), {"media", "exec"})  # nothing else under tools changes
 
     def test_the_wrapper_takes_the_laptop_answer_and_falls_back_to_the_cpu(self):
         import http.server

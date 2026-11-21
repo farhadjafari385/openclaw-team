@@ -98,13 +98,13 @@ class Rules(unittest.TestCase):
         disk.clean_docker(cfg, NOW, lambda m: None)
         removed = [c for c in calls if c[:3] == ["docker", "volume", "rm"]]
         self.assertEqual(removed, [], "no pressure: CI caches stay")
-        self.assertIn(["docker", "builder", "prune", "-f", "--filter", "until=72h"], calls)
+        self.assertIn(["docker", "builder", "prune", "-f", "--reserved-space", "6GB"], calls)
         calls.clear()
         n = disk.clean_docker(cfg, NOW, lambda m: None, pressure=True)
         removed = [c for c in calls if c[:3] == ["docker", "volume", "rm"]]
         self.assertEqual(removed, [["docker", "volume", "rm", cache]], "only the runner job cache; named data volumes stay")
         self.assertEqual(n, 1)
-        self.assertIn(["docker", "builder", "prune", "-f", "--filter", "until=24h"], calls)
+        self.assertIn(["docker", "builder", "prune", "-f", "--reserved-space", "2GB"], calls)
         calls.clear()
         disk.clean_docker(cfg, NOW, lambda m: None, dry=True, pressure=True)
         self.assertFalse([c for c in calls if c[1:3] in (["volume", "rm"], ["builder", "prune"])], "a dry run removes nothing")

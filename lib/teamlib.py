@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import disk  # noqa: E402
 import heal  # noqa: E402
+import watch  # noqa: E402
 import graphs  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
@@ -324,6 +325,7 @@ def guard_config(team, projects, live, mirror=True):
                   "wip": int(board.get("wip", 1)), "projectOrder": list(board.get("project_order", [])),
                   "maxOpen": int(board.get("max_open", 0)),
                   "maxTasksPerItem": int(board.get("max_tasks_per_item", 0)),
+                  "maxNoProgress": int(board.get("max_no_progress", 3)), "requireDoneWhen": bool(board.get("require_done_when", False)),
                   "maxTasksByAgent": {a["id"]: int(a["max_tasks"]) for a in team["agents"] if a.get("max_tasks")}},
         "workspaceRoot": team["team"]["workspace_root"],
         "briefCheckAgents": [orch],
@@ -481,10 +483,20 @@ def desired_config(team, projects, live, mirror=True):
                                          ("claude-haiku-5-5", "Claude Haiku 5.5", "triage_context_tokens", 200000),
                                          ("claude-sonnet-5", "Claude Sonnet 5", "triage_context_tokens", 200000))]}}},
         # Only tools.media is the repo's; the other top-level tool settings stay as they are on the host.
-        "tools": {**(live.get("tools") or {}), "media": voice_media(team)},
+        "tools": {**(live.get("tools") or {}), "media": voice_media(team), **exec_tools(team, live)},
         **({"browser": {"profiles": {name: {"cdpUrl": p["cdp_url"], "attachOnly": True}
                                      for name, p in team["browser_profiles"].items()}}} if team.get("browser_profiles") else {}),
     }
+
+
+def exec_tools(team, live):
+    """tools.exec with OpenClaw's background window raised: a command that runs longer than backgroundMs (10 s by default) is
+    sent to the background and the model polls it, one full-context model call per poll (2026-11-13..17: 5.8k polls in the
+    writer and devops sessions, about 75k cached tokens each, none of them doing work)."""
+    ms = int(team["limits"].get("exec_background_ms", 0) or 0)
+    if not ms:
+        return {}
+    return {"exec": {**((live.get("tools") or {}).get("exec") or {}), "backgroundMs": ms}}
 
 
 def voice_media(team):
@@ -694,10 +706,14 @@ UNITS = {
     # 2026-11-15: 36 runnable processes on 6 vCPUs; the gateway stalled 59 s and the owner's messages waited 5-12 min.
     "openclaw-team-prio.service": "[Unit]\nDescription=openclaw-team: the gateway runs ahead of the agents' builds and tests\n\n[Service]\nType=oneshot\nExecStart=%h/openclaw-team/bin/team-prio\n",
     "openclaw-team-prio.timer": "[Unit]\nDescription=openclaw-team CPU priorities every 30 seconds\n\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=30s\nAccuracySec=5s\n\n[Install]\nWantedBy=timers.target\n",
+    # 2026-11-21 (owner: "your observing is temporary, make them live"): the owner-asks list, the progress page,
+    # the daily digest and the watchdog that tells the owner when the team stops working.
+    "openclaw-team-watch.service": "[Unit]\nDescription=openclaw-team: owner asks, progress page, watchdog\n\n[Service]\nType=oneshot\nNice=10\nTimeoutStartSec=4min\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team watch\n",
+    "openclaw-team-watch.timer": "[Unit]\nDescription=openclaw-team watch every 5 minutes\n\n[Timer]\nOnBootSec=6min\nOnUnitActiveSec=5min\n\n[Install]\nWantedBy=timers.target\n",
     "openclaw-gateway.service.d/team-mcp-timeout.conf": "[Service]\nEnvironment=MCP_TIMEOUT=120000\n",
 }
 TIMERS = ("openclaw-team-drift.timer", "openclaw-team-report.timer", "openclaw-team-gc.timer", "openclaw-team-disk.timer", "openclaw-team-graphs.timer",
-          "openclaw-team-heal.timer", "openclaw-team-prio.timer")
+          "openclaw-team-heal.timer", "openclaw-team-prio.timer", "openclaw-team-watch.timer")
 
 
 def install_units(lock):
@@ -1599,6 +1615,66 @@ def cmd_disk(args):
 def cmd_heal(args):
     team, _ = load()
     heal.run(lambda text: notify(team, text))
+
+
+def send_document(team, path, caption="", topic=None):
+    try:
+        live = live_config(team)
+        token = read(expand(bot_token_files(team, live)[orchestrator(team)["id"]])).strip()
+        thread = int(topic or team["telegram"]["system_topic"])
+        r = subprocess.run(["curl", "-sS", "-m", "60", "-o", "/dev/null", "-w", "%{http_code}",
+                            "-F", f"chat_id={team['telegram']['chat_id']}", *(["-F", f"message_thread_id={thread}"] if thread > 1 else []),
+                            "--form-string", f"caption={caption[:1000]}", "-F", f"document=@{path}",
+                            f"https://api.telegram.org/bot{token}/sendDocument"], capture_output=True, text=True, timeout=90)
+        return r.stdout.strip() == "200"
+    except Exception as e:
+        print(f"send_document failed: {e}", file=sys.stderr)
+        return False
+
+
+def cmd_watch(args):
+    """Owner asks file, progress page, daily digest, watchdog (owner 2026-11-21). Reads only; never moves an item."""
+    team, _ = load()
+    cfg = team.get("watch", {})
+    held = tuple(cfg.get("held_projects", []))
+    now = time.time()
+    state_path = HOME / ".openclaw" / "token-guard-state" / "team-watch.json"
+    state = watch.read_json(state_path, {})
+    jobs_state = watch.read_json(HOME / ".openclaw" / "token-guard-state" / "jobs.json", {})
+    try:
+        items = watch.oc_inbox_items()
+    except Exception as e:
+        print(f"board read failed: {e}", file=sys.stderr)
+        items = []
+    asks = watch.owner_asks(items, held)
+    asks_path = expand(cfg.get("asks_file", "~/.openclaw/workspace/coordinator/owner-asks.md"))
+    page_path = expand(cfg.get("page", "~/progress/index.html"))
+    watch.write_atomic(asks_path, watch.asks_markdown(asks, now))
+    usage = ""
+    lim = jobs_state.get("claudeLimitedUntil") or 0
+    if lim > now * 1000:
+        usage = "Claude limited until " + datetime.datetime.fromtimestamp(lim / 1000, datetime.timezone.utc).strftime("%m-%d %H:%M UTC")
+    watch.write_atomic(page_path, watch.render_page(items, jobs_state, now, usage, held))
+    if getattr(args, "dry_run", False):
+        print(watch.asks_markdown(asks, now)[:2000])
+        for kind, text in watch.watchdog(items, jobs_state, now, watch.gateway_active(), watch.disk_used_pct(), held):
+            print("ALERT", kind, text)
+        return
+    if skip_during_startup("team watch"):
+        watch.write_atomic(state_path, json.dumps(state))
+        return
+    sent = state.setdefault("sent", {})
+    if items:
+        for kind, text in watch.watchdog(items, jobs_state, now, watch.gateway_active(), watch.disk_used_pct(), held):
+            if watch.due(state, kind, now) and notify(team, "Team watch: " + text):
+                sent[kind] = now
+    if items and watch.digest_due(state, now, int(cfg.get("digest_hour_utc", 7))):
+        if notify(team, watch.digest_text(items, asks, now, held, jobs_state)):
+            send_document(team, page_path, "Team progress page (open in a browser)")
+            state["digest_day"] = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%d")
+    if getattr(args, "test_alert", False):
+        notify(team, "Team watch: test alert. The watchdog is live and will warn here if the team stops working.")
+    watch.write_atomic(state_path, json.dumps(state))
 
 
 PRIVACY_PATTERNS = HOME / ".config" / "openclaw-privacy-patterns"

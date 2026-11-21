@@ -396,8 +396,10 @@ def clean_docker(cfg, now, log, dry=False, pressure=False):
         done += len(caches)
     if not dry:
         run(["docker", "image", "prune", "-f"], timeout=900)
-        # Image builds leave their layers in the build cache (10 GB on 2026-11-11); recent ones keep builds fast.
-        run(["docker", "builder", "prune", "-f", "--filter", f"until={24 if pressure else 72}h"], timeout=1800)
+        # Image builds leave their layers in the build cache (10 GB on 2026-11-11). A size cap keeps the newest layers
+        # (base images, npm) so a rare release is not built cold; an age filter dropped them all (d68a69cb).
+        # --reserved-space is the renamed --keep-storage (Docker 29).
+        run(["docker", "builder", "prune", "-f", "--reserved-space", "2GB" if pressure else "6GB"], timeout=1800)
     return done
 
 
