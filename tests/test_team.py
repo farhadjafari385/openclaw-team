@@ -97,6 +97,8 @@ class ConfigTest(unittest.TestCase):
         self.assertIs(guard["pace"]["enabled"], True)  # the weekly limit lasts the week; off, the team spent it by mid-week (2026-11-21)
         self.assertEqual(guard["pace"]["reservePercent"], 85)  # owner 2026-11-21 (cost): hard stop at 85%
         self.assertEqual(guard["pace"]["fiveHourPercent"], 85)
+        self.assertEqual((guard["pace"]["windowStartPercent"], guard["pace"]["windowPerHour"], guard["pace"]["windowHours"]), (8.0, 0.5, 12.0))
+        self.assertTrue(guard["pace"]["windowStart"].startswith("2026-11-21T"))
         self.assertEqual(guard["board"]["maxNoProgress"], 2)
         self.assertIs(guard["board"]["requireDoneWhen"], True)
         self.assertIn("anthropic/claude-opus-5-5", guard["spawn"]["allowedModels"])  # owner: never downgrade to save tokens

@@ -53,6 +53,12 @@ enabled = true                   # on again after the 2026-11-21 reset: off, the
 ahead_percent = 5                # how far ahead of an even 7-day pace the team may run
 reserve_percent = 85             # owner 2026-11-21 (cost): above 85% of the week, only the owner's conversations run
 five_hour_percent = 85           # owner 2026-11-21 (cost): no new task above 85% of the 5-hour window
+# Owner 2026-11-21 11:45 UTC: "at most ~14% of the weekly limit over the next 12 hours; ~8% is used": weekly use may
+# grow 0.5 point per hour from 8%. Above that, new dispatches wait (one Telegram note); the owner's chats still run.
+window_start = "2026-11-21T11:45:00Z"
+window_start_percent = 8
+window_per_hour = 0.5
+window_hours = 12
 
 [jobs]                           # anti-stall follow-ups (token-guard job tracker)
 stall_minutes = 30

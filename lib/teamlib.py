@@ -373,6 +373,11 @@ def guard_config(team, projects, live, mirror=True):
             "aheadPercent": int(team.get("pace", {}).get("ahead_percent", 5)),
             "reservePercent": int(team.get("pace", {}).get("reserve_percent", 97)),
             "fiveHourPercent": int(team.get("pace", {}).get("five_hour_percent", 95)),
+            # An owner budget for a stretch of hours (owner 2026-11-21).
+            "windowStart": str(team.get("pace", {}).get("window_start", "")),
+            "windowStartPercent": float(team.get("pace", {}).get("window_start_percent", 0)),
+            "windowPerHour": float(team.get("pace", {}).get("window_per_hour", 0)),
+            "windowHours": float(team.get("pace", {}).get("window_hours", 0)),
         },
         "jobs": {
             "enabled": True,
