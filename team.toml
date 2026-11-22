@@ -85,7 +85,9 @@ max_wakes_per_day = 24
 enabled = true
 every_minutes = 10               # at most this often, and only when something needs a decision (no tokens otherwise)
 model = "anthropic/claude-haiku-5-5"
-max_wakes_per_day = 12           # Opus wakes the triage may cause per day (owner 2026-11-21 budget: was 24)
+max_wakes_per_day = 48           # a runaway fuse only. The waste guard is the line below: an unchanged board is
+                                 # not woken again. 2026-11-22: at 12 a day the team sat idle with 73 open items
+                                 # after a restart, because the day's wakes were used up by early afternoon.
 same_state_rewake_minutes = 180  # an unchanged board does not wake the orchestrator again within this time
 
 [board]                          # the task board (token-guard + oc-inbox)

@@ -178,7 +178,10 @@ class BoardTopicsSessionsTest(unittest.TestCase):
         self.assertEqual(g["jobs"]["budgetCalls"], 600)
         self.assertEqual(g["orchestratorMaxCallsPerRun"], 150)
         self.assertEqual(g["board"]["maxNoProgress"], 2)  # owner 2026-11-21: no third try that moves nothing
-        self.assertEqual(g["triage"]["maxWakesPerDay"], 12)  # owner 2026-11-21 budget
+        # 2026-11-22: at 12 a day the triage could no longer wake an idle team by early afternoon (73 open
+        # items, nothing running, for 25 minutes after a restart). The count is a fuse; an unchanged board is
+        # what must not be woken again (next line).
+        self.assertEqual(g["triage"]["maxWakesPerDay"], 48)
         self.assertEqual(g["triage"]["sameStateRewakeMinutes"], 180)
 
     def test_up_to_10_items_at_once_in_the_owners_project_order_and_ci_followed_by_the_guard(self):
