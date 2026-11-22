@@ -292,6 +292,15 @@ def skill_catalog(team):
     return out
 
 
+def known_chats(live, t):
+    tg = ((live or {}).get("channels") or {}).get("telegram") or {}
+    ids = {str(k) for k in (tg.get("groups") or {})}
+    for acc in (tg.get("accounts") or {}).values():
+        ids.update(str(k) for k in ((acc or {}).get("groups") or {}))
+    ids.add(str(t["chat_id"]))
+    return sorted(i for i in ids if i.startswith("-"))
+
+
 def guard_config(team, projects, live, mirror=True):
     t, m, lim, jobs = team["telegram"], team["models"], team["limits"], team.get("jobs", {})
     board = team.get("board", {})
@@ -311,7 +320,11 @@ def guard_config(team, projects, live, mirror=True):
     }
     return {
         "enabled": True,
-        "mode": "enforce",
+        # "safety" (owner 2026-11-22: no babysitter for senior agents): the guard stops only what protects the owner
+        # (secrets, the gateway, access, git history, real limits, who does what); the process rules are off.
+        "mode": str(team.get("guard", {}).get("mode", "enforce")),
+        # The groups the bots are in: a message to any other group id is an invented one and goes to the team group.
+        "knownChats": known_chats(live, t),
         "orchestratorAgent": orch,
         "orchestratorMaxCallsPerRun": int(lim.get("orchestrator_run_calls", 60)),
         "ownerId": str(team["owner"]["telegram_id"]),
@@ -692,18 +705,21 @@ def notify(team, text, topic=None):
 
 # ---------------------------------------------------------------- systemd
 
+# How often (2026-11-22): this host loses 18-42% of its CPU to its hypervisor and its swap was full. Over 3 hours the
+# code maps took 2792 CPU-seconds (558 s a run, every 30 min), the session clean-up 548, drift 409, the disk janitor 233,
+# while owner messages waited a median of 94 s to be seen. They now run every 6 hours (maps, clean-up), hourly (drift) and 3-hourly (disk).
 UNITS = {
     "openclaw-team-drift.service": "[Unit]\nDescription=openclaw-team: restore drifted rules/config\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team drift --fix --notify\n",
-    "openclaw-team-drift.timer": "[Unit]\nDescription=openclaw-team drift check every 15 minutes\n\n[Timer]\nOnBootSec=10min\nOnUnitActiveSec=15min\n\n[Install]\nWantedBy=timers.target\n",
+    "openclaw-team-drift.timer": "[Unit]\nDescription=openclaw-team drift check every hour\n\n[Timer]\nOnBootSec=10min\nOnUnitActiveSec=1h\n\n[Install]\nWantedBy=timers.target\n",
     "openclaw-team-report.service": "[Unit]\nDescription=openclaw-team: daily health report to Telegram\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team report --send\n",
     "openclaw-team-report.timer": "[Unit]\nDescription=openclaw-team daily report\n\n[Timer]\nOnCalendar=*-*-* 08:00\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
     "openclaw-team-gc.service": "[Unit]\nDescription=openclaw-team: delete finished and idle sessions\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team gc\n",
-    "openclaw-team-gc.timer": "[Unit]\nDescription=openclaw-team session clean-up every hour\n\n[Timer]\nOnBootSec=20min\nOnUnitActiveSec=1h\n\n[Install]\nWantedBy=timers.target\n",
+    "openclaw-team-gc.timer": "[Unit]\nDescription=openclaw-team session clean-up every 6 hours\n\n[Timer]\nOnBootSec=20min\nOnUnitActiveSec=6h\n\n[Install]\nWantedBy=timers.target\n",
     # The disk filled on 2026-11-07 and stopped the whole team: task leftovers go, and the operator is warned early.
     "openclaw-team-disk.service": "[Unit]\nDescription=openclaw-team: remove task leftovers, warn before the disk fills\n\n[Service]\nType=oneshot\nNice=10\nIOSchedulingClass=idle\nTimeoutStartSec=50min\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team disk\n",
-    "openclaw-team-disk.timer": "[Unit]\nDescription=openclaw-team disk clean-up every 30 minutes\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=30min\n\n[Install]\nWantedBy=timers.target\n",
+    "openclaw-team-disk.timer": "[Unit]\nDescription=openclaw-team disk clean-up every 3 hours\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=3h\n\n[Install]\nWantedBy=timers.target\n",
     "openclaw-team-graphs.service": "[Unit]\nDescription=openclaw-team: refresh the code maps (graphify) agents query before reading code\n\n[Service]\nType=oneshot\nNice=15\nIOSchedulingClass=idle\nTimeoutStartSec=60min\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team graphs\n",
-    "openclaw-team-graphs.timer": "[Unit]\nDescription=openclaw-team code maps every 30 minutes\n\n[Timer]\nOnBootSec=10min\nOnUnitActiveSec=30min\n\n[Install]\nWantedBy=timers.target\n",
+    "openclaw-team-graphs.timer": "[Unit]\nDescription=openclaw-team code maps every 6 hours\n\n[Timer]\nOnCalendar=*-*-* 04,10,16,22:10:00 UTC\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
     # 2026-11-11: OpenClaw locked the orchestrator's database after a starved restart and refused every message
     # for 8.5 hours, until a restart. This finds that state in the log and restarts once nothing is running.
     "openclaw-team-heal.service": "[Unit]\nDescription=openclaw-team: restart the gateway when OpenClaw has locked an agent's database\n\n[Service]\nType=oneshot\nTimeoutStartSec=20min\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team heal\n",

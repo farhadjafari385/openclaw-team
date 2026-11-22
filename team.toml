@@ -22,7 +22,7 @@ secrets_dir = "~/.openclaw/secrets"
 
 [models]
 orchestrator = { primary = "anthropic/claude-opus-5-5", fallbacks = [], thinking = "medium" }   # owner 2026-11-17: never downgrade models to save tokens
-specialists  = { primary = "anthropic/claude-sonnet-5-5", fallbacks = [], thinking = "low" }   # owner 2026-11-13: Sonnet 5.5 or higher, never Sonnet 5
+specialists  = { primary = "anthropic/claude-sonnet-5-5", fallbacks = [], thinking = "medium" }   # owner 2026-11-13: Sonnet 5.5 or higher, never Sonnet 5
 spawn_allowed = [                  # owner 2026-11-17: never take Opus away to save tokens
   "anthropic/claude-opus-5-5",
   "anthropic/claude-sonnet-5-5",   # a retired version leaves this list; the guard moves its requests to the next one
@@ -40,13 +40,25 @@ cli_stable_system_prompt = true  # OpenClaw built the orchestrator's system prom
 voice_timeout_seconds = 180 # owner voice notes: the laptop GPU answers in seconds; the server CPU fallback took 88 s for a 9 s note under load (2026-11-14), so 90 s failed.
 telegram_cache_keep_days = 0      # OpenClaw's retained Telegram cache never expires and is loaded whole on the main thread (22k entries, 2026-11-14); apply trims it while the gateway is stopped
 worker_context_tokens = 100000       # a worker session compacts here (workers start at ~40k); Sonnet 5.5 had 1,000,000 by default (2026-11-14). 100k since 2026-11-17 (owner: cut the reads).
-orchestrator_context_tokens = 90000  # the orchestrator compacts here: it starts at ~46k and its conversation never resets (median call 113k, ~630M reads a day on 2026-11-15). 2026-11-17.
+orchestrator_context_tokens = 150000 # the orchestrator compacts here. 90000 (2026-11-17, to cut cached reads) left it 15k of room: it starts at ~51k and compacted at ~66k, so on 2026-11-20..22 it summarised its own conversation 375 times in 48 h, once every 7 model calls (each time an Opus summary plus a re-cache, about 40% of its tokens, and it lost the details of what it had just said and done). 150000 gives it about 5 times the room; a cached read costs a tenth of what the rewrite does.
 exec_background_ms = 120000      # OpenClaw sends any command that runs over 10 s to the background and the model polls it: 5.8k polls in 4 days in writer+devops, ~75k cached tokens each (2026-11-13..17). 120 s (OpenClaw's maximum) lets most commands finish in the one call.
 max_concurrent_tasks = 10        # tasks running at once, whole team (owner 2026-11-10: 1-3 per agent by role; per agent: max_tasks)
-task_timeout_seconds = 3600
+task_timeout_seconds = 10800      # 3 h (2026-11-22): one task takes its item to a green MR, its own pipeline waits included (was 1 h: median task 4.3 min, 32% ended "waiting")
 task_budget_tokens = 15000000    # tokens one task may process before it must finish (the Claude CLI reports little usage)
-task_budget_calls = 100          # tool calls one task may make before it must finish (what actually stops a runaway task)
-orchestrator_run_calls = 60      # tool calls in one orchestrator run (a wake or an owner message); telling the owner stays allowed
+task_budget_calls = 600           # tool calls one task may make before it must finish (what actually stops a runaway task)
+orchestrator_run_calls = 150      # tool calls in one orchestrator run (a wake or an owner message); telling the owner stays allowed
+
+[guard]
+# Owner 2026-11-22: "I don't want a babysitter for 11 senior agents." Measured 11-20..22: 270 of 971 dispatches
+# started; about 580 refusals were the guard's own process rules, and it moved 50 of the orchestrator's messages to
+# another topic. "safety" keeps the rules that protect the owner (secrets, the gateway, access, protected rules and
+# config, git history, real usage limits, the 95% weekly stop, who does what) and switches every process rule off:
+# queue order, limits per agent and per item, brief format, call budgets, waiting and polling, code map first,
+# the full local pipeline before a push, model lists, moving or holding the orchestrator's messages.
+# Three fuses against a runaway stay on (owner 2026-11-22: "no loop wasting, no call wasting"): a task ends at
+# [limits] task_budget_calls, an orchestrator run at orchestrator_run_calls, and an item gets no further try after
+# [board] max_no_progress tasks in a row that moved nothing, until something changes. "enforce" brings every rule back.
+mode = "safety"
 
 [pace]                           # the plan's weekly limit lasts the week (token-guard reads the CLI's usage every 10 min)
 enabled = true
@@ -253,7 +265,6 @@ bot = "social"
 handle = "{{private:BOT_SOCIAL}}"   # Telegram @username of that bot (checked by team verify)
 role = "social"
 tools = { profile = "full", deny = ["gateway"] }   # shell + laptop browser: owner 2026-11-09
-task_budget_calls = 300   # browser work: one site takes 15-20 calls; at 100 one task posted once and stopped
 
 [[agents]]
 id = "growth"
@@ -266,7 +277,6 @@ bot = "growth"
 handle = "{{private:BOT_GROWTH}}"   # Telegram @username of that bot (checked by team verify)
 role = "growth"
 tools = { profile = "full", deny = ["gateway"] }   # shell + laptop browser: owner 2026-11-09
-task_budget_calls = 300   # browser work: one site takes 15-20 calls; at 100 one task listed once and stopped
 
 [watch]                         # bin/team watch, every 5 minutes (owner 2026-11-21: "make them live")
 held_projects = ["openclaw-ui", "{{private:BRAND_GAME_SLUG}}"]   # owner hold of 2026-11-16: no work, not counted as idle

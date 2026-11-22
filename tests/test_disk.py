@@ -126,7 +126,7 @@ class Rules(unittest.TestCase):
     def test_the_timer_runs_it_and_verify_checks_it(self):
         self.assertIn("openclaw-team-disk.timer", teamlib.TIMERS)
         self.assertIn("bin/team disk", teamlib.UNITS["openclaw-team-disk.service"])
-        self.assertIn("OnUnitActiveSec=30min", teamlib.UNITS["openclaw-team-disk.timer"])
+        self.assertIn("OnUnitActiveSec=3h", teamlib.UNITS["openclaw-team-disk.timer"])  # 2026-11-22: 233 CPU-s in 3 h on a starved host
         src = (REPO / "lib" / "teamlib.py").read_text()
         self.assertIn("disk.usage()", src.split("\ndef checks(")[1].split("\ndef ")[0], "verify reports the disk")
 

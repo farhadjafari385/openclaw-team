@@ -173,8 +173,11 @@ class BoardTopicsSessionsTest(unittest.TestCase):
 
     def test_guard_budgets_count_tool_calls_and_triage_does_not_rewake_the_same_state(self):
         g = teamlib.guard_config(self.team, self.projects, LIVE)
-        self.assertEqual(g["jobs"]["budgetCalls"], 100)
-        self.assertEqual(g["orchestratorMaxCallsPerRun"], 60)
+        # Owner 2026-11-22 (no babysitter): the budgets no longer cut a task or an orchestrator run short.
+        # They are fuses now, far above normal work (a task was cut at 100 calls, an orchestrator run at 60).
+        self.assertEqual(g["jobs"]["budgetCalls"], 600)
+        self.assertEqual(g["orchestratorMaxCallsPerRun"], 150)
+        self.assertEqual(g["board"]["maxNoProgress"], 2)  # owner 2026-11-21: no third try that moves nothing
         self.assertEqual(g["triage"]["maxWakesPerDay"], 12)  # owner 2026-11-21 budget
         self.assertEqual(g["triage"]["sameStateRewakeMinutes"], 180)
 
@@ -193,11 +196,17 @@ class BoardTopicsSessionsTest(unittest.TestCase):
         files = teamlib.render_files(self.team, self.projects)
         worker = next(c for p, c in files.items() if p.endswith("/writer/AGENTS.md"))
         self.assertIn("RESULT: waiting", worker)
-        self.assertNotIn("oc-wait-pipeline", worker)  # nobody waits for CI in a session any more
+        # Owner 2026-11-22: the item's owner waits for its own pipeline and fixes a red one, in the same task
+        # (median task was 4.3 min and 32% ended "waiting"; one patch took 11 tasks over 19 hours).
+        self.assertIn("oc-wait-pipeline", worker)
+        self.assertIn("You own the item until it is proven", worker)
         orc = next(c for p, c in files.items() if p.endswith("/coordinator/AGENTS.md"))
-        self.assertIn("up to 14 items at once, each agent up to its limit", orc)
-        self.assertIn("one item per deliverable that one task can finish", orc)
-        self.assertIn("10 tasks per item, then split (enforced)", orc)
+        self.assertIn("One owner per item, from start to live", orc)
+        self.assertIn("Never cut work into steps", orc)
+        for gone in ("10 tasks per item, then split", "The guard refuses anything else", "Workers never wait for CI"):
+            self.assertNotIn(gone, orc)  # no queue, limit or split rule any more
+        self.assertEqual(g["mode"], "safety")
+        self.assertIn(self.team["telegram"]["chat_id"], g["knownChats"])
         self.assertIn("`User path:` line (the guard checks)", orc)
 
     def test_agents_reach_the_owners_logins_through_the_laptop_browser_profile(self):
@@ -233,10 +242,10 @@ class BoardTopicsSessionsTest(unittest.TestCase):
         # 2026-11-09: social's task "5 new posts" hit the 100-call budget after one live post (86 of its 102
         # calls were laptop-browser steps), so browser agents get their own budget; the rest keep the default.
         jobs = teamlib.guard_config(self.team, self.projects, LIVE, mirror=False)["jobs"]
-        self.assertEqual(jobs["budgetCalls"], 100)
-        for a in ("growth", "social"):
-            self.assertGreaterEqual(jobs["budgetCallsByAgent"][a], 300, a)
-        self.assertEqual(set(jobs["budgetCallsByAgent"]), {"growth", "social"})
+        # 2026-11-22: no agent is cut short any more, so none needs a budget of its own below the team's.
+        self.assertGreaterEqual(jobs["budgetCalls"], 600)
+        for a, n in jobs["budgetCallsByAgent"].items():
+            self.assertGreaterEqual(n, jobs["budgetCalls"], a)
         e = teamlib.desired_config(self.team, self.projects, LIVE, mirror=False)["agents"]["entries"]
         self.assertNotIn("task_budget_calls", e["growth"])  # a guard setting, not an OpenClaw one
 
@@ -351,7 +360,10 @@ class BoardTopicsSessionsTest(unittest.TestCase):
             self.assertIn(mid, budgets)
             self.assertLessEqual(budgets[mid], 200000)
         self.assertLessEqual(budgets["claude-sonnet-5-5"], 100000)
-        self.assertLessEqual(budgets["claude-opus-5-5"], 90000)  # the orchestrator's conversation never resets (2026-11-17)
+        # 2026-11-22: at 90000 the orchestrator had 15k of room over its ~51k start and compacted every 7 model calls
+        # (375 times in 48 h, about 40% of its tokens); it needs room to work, and stays well under the model's window.
+        self.assertGreaterEqual(budgets["claude-opus-5-5"], 130000)
+        self.assertLessEqual(budgets["claude-opus-5-5"], 160000)
 
     def test_telegram_gets_results_only(self):
         # 2026-11-14: three posts per task (dispatch, "On it", result), ~860 a day; the owner saw no deliveries in them.
