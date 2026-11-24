@@ -12,6 +12,8 @@
   team graphs [--force]           install/upgrade the pinned graphify and refresh every code map agents
                                    must query before reading code (30-minute timer; no AI calls)
   team watch [--dry-run]           owner asks file, progress page, daily digest, watchdog alerts (5-minute timer)
+  team usage [--dry-run] [--show HOUR]  hourly usage report (calls, context per call, tokens, model/effort per
+                                   agent) and alarms to Telegram; code only, no AI (10-minute timer, report at :02)
   team disk [--dry-run]            remove task leftovers (browser profiles, idle worktrees, /tmp copies, test
                                    containers) and warn in Telegram before the disk fills (30-minute timer)
   team reset --yes                 one-time clean slate: archive memory and task boards, carry open
@@ -43,10 +45,13 @@ def main(argv=None):
     lk.add_argument("--commits")
     wt = sub.add_parser("watch", help="owner asks, progress page, digest and watchdog (5-minute timer)")
     wt.add_argument("--dry-run", action="store_true"); wt.add_argument("--test-alert", action="store_true")
+    us = sub.add_parser("usage", help="hourly usage report and alarms (10-minute timer; no AI)")
+    us.add_argument("--dry-run", action="store_true", help="read and print what would be posted; the saved state is not touched")
+    us.add_argument("--show", metavar="YYYY-MM-DDTHH", help="print one hour's report from the saved state")
     gr = sub.add_parser("graphs"); gr.add_argument("--force", action="store_true", help="re-export and rebuild every map")
     args = p.parse_args(argv)
     {"render": teamlib.cmd_render, "apply": teamlib.cmd_apply, "verify": teamlib.cmd_verify, "drift": teamlib.cmd_drift,
-     "report": teamlib.cmd_report, "reset": teamlib.cmd_reset, "gc": teamlib.cmd_gc, "disk": teamlib.cmd_disk, "graphs": teamlib.cmd_graphs, "heal": teamlib.cmd_heal, "leaks": teamlib.cmd_leaks, "notify": teamlib.cmd_notify, "watch": teamlib.cmd_watch}[args.cmd](args)
+     "report": teamlib.cmd_report, "reset": teamlib.cmd_reset, "gc": teamlib.cmd_gc, "disk": teamlib.cmd_disk, "graphs": teamlib.cmd_graphs, "heal": teamlib.cmd_heal, "leaks": teamlib.cmd_leaks, "notify": teamlib.cmd_notify, "watch": teamlib.cmd_watch, "usage": teamlib.cmd_usage}[args.cmd](args)
 
 
 if __name__ == "__main__":

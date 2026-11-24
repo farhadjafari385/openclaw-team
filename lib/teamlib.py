@@ -26,6 +26,7 @@ import disk  # noqa: E402
 import heal  # noqa: E402
 import watch  # noqa: E402
 import graphs  # noqa: E402
+import usage  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 HOME = Path.home()
@@ -739,10 +740,15 @@ UNITS = {
     # the daily digest and the watchdog that tells the owner when the team stops working.
     "openclaw-team-watch.service": "[Unit]\nDescription=openclaw-team: owner asks, progress page, watchdog\n\n[Service]\nType=oneshot\nNice=10\nTimeoutStartSec=4min\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team watch\n",
     "openclaw-team-watch.timer": "[Unit]\nDescription=openclaw-team watch every 5 minutes\n\n[Timer]\nOnBootSec=6min\nOnUnitActiveSec=5min\n\n[Install]\nWantedBy=timers.target\n",
+    # 2026-11-24 (owner: "report every hour how many calls, how much context per call, how many tokens, which
+    # model/effort, fully automated, not by AI"): the hourly usage report and its alarms (lib/usage.py). It reads only
+    # what was written since its last run, at the lowest CPU and disk priority, capped at 30% of one CPU and 400 MB.
+    "openclaw-team-usage.service": "[Unit]\nDescription=openclaw-team: hourly usage report and alarms (no AI)\n\n[Service]\nType=oneshot\nNice=19\nIOSchedulingClass=idle\nCPUQuota=30%\nMemoryMax=400M\nTimeoutStartSec=8min\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team usage\n",
+    "openclaw-team-usage.timer": "[Unit]\nDescription=openclaw-team usage report (hourly at :02) and alarms every 10 minutes\n\n[Timer]\nOnCalendar=*:02/10\nAccuracySec=20s\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
     "openclaw-gateway.service.d/team-mcp-timeout.conf": "[Service]\nEnvironment=MCP_TIMEOUT=120000\n",
 }
 TIMERS = ("openclaw-team-drift.timer", "openclaw-team-report.timer", "openclaw-team-gc.timer", "openclaw-team-disk.timer", "openclaw-team-graphs.timer",
-          "openclaw-team-heal.timer", "openclaw-team-prio.timer", "openclaw-team-watch.timer")
+          "openclaw-team-heal.timer", "openclaw-team-prio.timer", "openclaw-team-watch.timer", "openclaw-team-usage.timer")
 
 
 def install_units(lock):
@@ -1697,6 +1703,9 @@ def cmd_watch(args):
         for kind, text in watch.watchdog(items, jobs_state, now, watch.gateway_active(), watch.disk_used_pct(), held):
             if watch.due(state, kind, now) and notify(team, "Team watch: " + text):
                 sent[kind] = now
+    late = usage.report_overdue(watch.read_json(USAGE_STATE, {}), now)
+    if late and watch.due(state, "usage-report", now) and notify(team, "Team watch: " + late):
+        sent["usage-report"] = now
     if items and watch.digest_due(state, now, int(cfg.get("digest_hour_utc", 7))):
         if notify(team, watch.digest_text(items, asks, now, held, jobs_state)):
             send_document(team, page_path, "Team progress page (open in a browser)")
@@ -1704,6 +1713,94 @@ def cmd_watch(args):
     if getattr(args, "test_alert", False):
         notify(team, "Team watch: test alert. The watchdog is live and will warn here if the team stops working.")
     watch.write_atomic(state_path, json.dumps(state))
+
+
+USAGE_STATE = HOME / ".openclaw" / "token-guard-state" / "team-usage.json"
+
+
+def cmd_usage(args):
+    """Hourly usage report and alarms (owner 2026-11-24). Reads transcripts, the gateway log and the guard's state;
+    never calls a model. A dry run works on a copy of the state, so it never moves what the timer has read."""
+    import fcntl
+    team, _ = load()
+    cfg = usage.config(team)
+    if not cfg.get("enabled", True):
+        print("team usage: disabled in team.toml [usage]")
+        return
+    state_path = USAGE_STATE
+    if getattr(args, "show", None):
+        state = watch.read_json(state_path, {})
+        start = usage.hour_start(args.show)
+        print(usage.render(state, start, start + usage.HOUR_S, f"Team usage · {args.show}:00 UTC (from the saved state)",
+                           watch.read_json(HOME / ".openclaw" / "token-guard-state" / "jobs.json", {})))
+        return
+    dry = getattr(args, "dry_run", False)
+    if dry:
+        work = Path("/dev/shm" if os.path.isdir("/dev/shm") else tempfile.gettempdir()) / f"team-usage-dry-{os.getpid()}.json"
+        if state_path.exists():
+            shutil.copy2(state_path, work)
+        state_path = work
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    lock = open(str(state_path) + ".lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("team usage: another run is still going")
+        return
+    age = gateway_age_s()
+    if not dry and ((age is not None and age < STARTUP_QUIET_MIN * 60) or restart_under_way()):
+        print("team usage: skipped, the gateway is starting (it gets the first minutes of a start to itself)")
+        return
+    now = time.time()
+    state = watch.read_json(state_path, {})
+    first = "installed_at" not in state
+    stats = usage.ingest(state, str(HOME / ".claude" / "projects"), "/tmp/openclaw", now)
+    jobs_state = watch.read_json(HOME / ".openclaw" / "token-guard-state" / "jobs.json", {})
+    usage.record_week(state, jobs_state.get("paceUsage"))
+    if first:
+        state["installed_at"] = now
+        y = datetime.datetime.fromtimestamp(now, datetime.timezone.utc) - datetime.timedelta(days=1)
+        state["last_daily"] = y.strftime("%Y-%m-%d")   # no summary for a day it did not watch
+    stop = float(team.get("pace", {}).get("reserve_percent", cfg["stop_percent"]))
+    topic = int(cfg.get("topic") or 0) or None
+    posts = []
+    due = usage.due_alarms(state, usage.alarms(state, cfg, now), cfg, now)
+    if due:
+        posts.append(("alarm", usage.alarm_text(due, state, now), [k for k, _ in due]))
+    hour = usage.report_hour_due(state, now, int(cfg["report_minute"]))
+    if hour is not None:
+        h = datetime.datetime.fromtimestamp(hour, datetime.timezone.utc)
+        title = f"📊 Team usage · {h:%H}:00–{(h + datetime.timedelta(hours=1)):%H}:00 UTC ({h:%a %d %b})"
+        posts.append(("hour", usage.render(state, hour, hour + usage.HOUR_S, title, jobs_state, stop), hour))
+    day = usage.daily_due(state, now, int(cfg["daily_hour_utc"]), int(cfg["report_minute"]))
+    if day:
+        start = datetime.datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc).timestamp()
+        title = f"📅 Team usage · {day} (whole UTC day)"
+        if state.get("installed_at", 0) > start:
+            title += f", counted from {datetime.datetime.fromtimestamp(state['installed_at'], datetime.timezone.utc):%H:%M} UTC"
+        posts.append(("day", usage.render(state, start, start + 24 * usage.HOUR_S, title, jobs_state, stop), day))
+    print(f"team usage: read {stats['bytes'] / 1e6:.1f} MB, {stats['calls']} new calls, {stats['events']} gateway events"
+          + (" (read cap reached; the rest comes next run)" if stats["capped"] else ""))
+    for kind, text, key in posts:
+        if dry:
+            print(f"---- would post ({kind}):\n{text}")
+            continue
+        if notify(team, text, topic):
+            if kind == "alarm":
+                for k in key:
+                    state.setdefault("alarms_sent", {})[k] = now
+            elif kind == "hour":
+                state["last_report_hour"] = key
+            else:
+                state["last_daily"] = key
+    if dry:
+        for p in (state_path, Path(str(state_path) + ".lock")):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        return
+    watch.write_atomic(state_path, json.dumps(state, separators=(",", ":")))
 
 
 PRIVACY_PATTERNS = HOME / ".config" / "openclaw-privacy-patterns"

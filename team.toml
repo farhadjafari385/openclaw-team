@@ -291,6 +291,21 @@ asks_file = "~/.openclaw/workspace/coordinator/owner-asks.md"
 page = "/srv/team-pages/progress/index.html"   # served at https://chat.{{private:BRAND_AI_SLUG}}.cloud/progress/ behind its basic auth (nginx: /srv/edge/extra/<that host>.conf)
 digest_hour_utc = 7
 
+[usage]                         # bin/team usage (owner 2026-11-24): hourly report of calls, context per call, tokens and
+                                # model/effort per agent to the system topic at HH:02, plus alarms; code only, no AI
+enabled = true
+topic = 0                       # 0 = telegram.system_topic (Team)
+report_minute = 2
+daily_hour_utc = 0              # yesterday's whole-day summary at 00:02 UTC
+alarm_agent_calls_30m = 80      # first values; the owner sets them after a day of reports
+alarm_total_calls_hour = 500
+alarm_context_tokens = 150000
+alarm_rebuilds_hour = 30
+alarm_week_jump_hour = 2.5
+alarm_forecast_margin_hours = 6
+alarm_recaps_hour = 40
+alarm_repeat_minutes = 60
+
 [graphs]
 # Code maps (graphify) for every project with `graph` repos in projects.toml: built from origin's default
 # branch every 30 minutes (`team graphs`), tree-sitter only (no AI calls). The guard makes every task in
