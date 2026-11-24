@@ -12,9 +12,10 @@ This module reads what already exists on the host and never calls a model:
 Every file is read incrementally: the byte offset of each file is kept in the state file, so a run reads only what
 was written since the last run (3.4 GB of transcripts on the host; a full read would load the box for minutes).
 
-Cost shares use Anthropic's published API prices (cache write 1h = 2x input, 5m = 1.25x, cache read 0.05x on Opus 5.5
-and Sonnet 5.5, 0.1x on others, output 5x; Opus 5.5 input $4 vs Sonnet $3 per MTok). Anthropic does not publish how
-the subscription meter weighs them, so the report shows them as shares, never as a limit percentage. The limit
+Cost shares use Anthropic's published API list prices (PRICES below: Opus 5.5 $4, Sonnet 5.5 $2, Haiku 5.5 $0.10 per
+million input tokens; cache write 1h = 2x input, 5m = 1.25x, cache read 0.05x on Opus/Sonnet 5.5; output 5x). Anthropic
+does not publish how the subscription meter weighs them, so the report shows shares and an API-price yardstick,
+never a limit percentage. The limit
 percentage itself comes from Anthropic (the guard's paceUsage)."""
 import datetime as dt
 import json
@@ -87,21 +88,39 @@ def family(model):
     return m.group(1) if m else "other"
 
 
+# Anthropic list prices, USD per million base input tokens, and the cache-read multiplier
+# (https://platform.claude.com/docs/en/about-claude/pricing, read 2026-11-24). Output is 5x input on every model,
+# a 5-minute cache write 1.25x, a 1-hour cache write 2x. First match wins.
+PRICES = [
+    (r"opus-5-5", 4.0, 0.05), (r"sonnet-5-5", 2.0, 0.05),
+    (r"(fable|mythos)-5-2", 8.0, 0.025), (r"(fable|mythos)-5-1", 10.0, 0.025), (r"(fable|mythos)-5", 10.0, 0.1),
+    (r"haiku-5-5", 0.10, 0.1),                       # 0.50 when the prompt is over 100k tokens (below)
+    (r"opus-4-1|opus-4-2025|opus-4$|opus-4-0", 15.0, 0.1), (r"opus-(5|4)", 5.0, 0.1),
+    (r"sonnet-5", 2.0, 0.1), (r"sonnet-4", 3.0, 0.1), (r"haiku-4", 1.0, 0.1),
+]
+
+
+def price_of(model, prompt_tokens=0):
+    """(USD per million input tokens, cache-read multiplier) for a model id; unknown models are priced like Sonnet."""
+    m = str(model).lower()
+    for rx, usd, read in PRICES:
+        if re.search(rx, m):
+            if rx == r"haiku-5-5" and prompt_tokens > 100000:
+                return 0.50, read
+            return usd, read
+    return 2.0, 0.1
+
+
 def weights(rec):
-    """(total, write, read, output) cost of one call in Sonnet-input-token units, at Anthropic's API prices."""
-    model = str(rec.get("model", "")).lower()
-    fam = family(model)
-    price = {"opus": 4 / 3, "sonnet": 1.0, "haiku": 1 / 3}.get(fam, 1.0)
-    if re.search(r"(opus|sonnet)-5-5", model):
-        read_rate = 0.05
-    elif fam in ("fable", "mythos"):
-        read_rate = 0.025
-    else:
-        read_rate = 0.1
-    write = price * (1.25 * rec["w5"] + 2.0 * rec["w1h"])
-    read = price * read_rate * rec["read"]
-    out = price * 5 * rec["out"]
-    return price * rec["in"] + write + read + out, write, read, out
+    """(total, write, read, output) cost of one call in US dollars at Anthropic's API list prices. The Max plan is
+    not billed per token; this is the common scale that makes agents, models and hours comparable."""
+    prompt = rec["in"] + rec["read"] + rec["w5"] + rec["w1h"]
+    usd, read_rate = price_of(rec.get("model", ""), prompt)
+    per = usd / 1e6
+    write = per * (1.25 * rec["w5"] + 2.0 * rec["w1h"])
+    read = per * read_rate * rec["read"]
+    out = per * 5 * rec["out"]
+    return per * rec["in"] + write + read + out, write, read, out
 
 
 def parse_line(line):
@@ -396,6 +415,7 @@ def render(state, start, end, title, jobs_state=None, stop=95.0):
         lines.append(f"• New sessions: {tot['new_sessions']} · rebuilt after a prompt change: {drift}")
         if tot["wc"] > 0:
             lines.append(f"• Where the cost went: rebuilding {100 * tot['wc_write'] / tot['wc']:.0f}% · re-reading {100 * tot['wc_read'] / tot['wc']:.0f}% · answers {100 * tot['wc_out'] / tot['wc']:.0f}%")
+            lines.append(f"• Value used at API list prices: ${tot['wc']:,.2f} (the plan is not charged per token; this is the yardstick)")
     recaps = gw["triggers"].get("session-activity-summary", 0)
     if recaps:
         lines.append(f"• Hidden activity summaries (Haiku, not in the counts above): {recaps}")

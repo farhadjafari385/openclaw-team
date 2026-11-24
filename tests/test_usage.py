@@ -52,11 +52,17 @@ class ParseTest(unittest.TestCase):
     def test_weights_use_published_prices(self):
         r = usage.parse_line(call("m", T0, model="claude-opus-5-5", inp=0, read=1000, w5=0, w1h=1000, out=100).encode())
         total, write, read, out = usage.weights(r)
-        self.assertAlmostEqual(write, 4 / 3 * 2000)          # 1h write = 2x, Opus = 4/3 of Sonnet
-        self.assertAlmostEqual(read, 4 / 3 * 0.05 * 1000)    # read 0.05x on Opus 5.5
-        self.assertAlmostEqual(out, 4 / 3 * 500)
-        r2 = usage.parse_line(call("n", T0, model="claude-haiku-5-5", inp=0, read=1000, w1h=0, out=0).encode())
-        self.assertAlmostEqual(usage.weights(r2)[2], 1 / 3 * 0.1 * 1000)
+        self.assertAlmostEqual(write, 4e-6 * 2000)           # Opus 5.5 $4/MTok, 1h write = 2x
+        self.assertAlmostEqual(read, 4e-6 * 0.05 * 1000)     # read 0.05x on Opus 5.5
+        self.assertAlmostEqual(out, 4e-6 * 500)              # output 5x
+        sonnet = usage.parse_line(call("s", T0, model="claude-sonnet-5-5", inp=0, read=0, w1h=1000, out=0).encode())
+        self.assertAlmostEqual(usage.weights(sonnet)[1] * 2, write)   # Opus is 2x Sonnet 5.5
+        haiku = usage.parse_line(call("n", T0, model="claude-haiku-5-5", inp=0, read=1000, w1h=0, out=0).encode())
+        self.assertAlmostEqual(usage.weights(haiku)[2], 0.10e-6 * 0.1 * 1000)
+        long = usage.parse_line(call("l", T0, model="claude-haiku-5-5", inp=0, read=150000, w1h=0, out=0).encode())
+        self.assertAlmostEqual(usage.weights(long)[2], 0.50e-6 * 0.1 * 150000)   # over 100k tokens: $0.50
+        self.assertEqual(usage.price_of("claude-fable-5-2"), (8.0, 0.025))
+        self.assertEqual(usage.price_of("claude-opus-4-8"), (5.0, 0.1))
 
     def test_gateway_line_counts_once(self):
         ev = usage.parse_gateway_line(gw(T0, "session-activity-summary", "none").encode())
@@ -165,7 +171,7 @@ class ReportTest(unittest.TestCase):
                              week=[(T0 - 3600, 40), (T0 + 3500, 41.8)])
         text = usage.render(st, T0, T0 + 3600, "📊 Team usage · 08:00–09:00 UTC", {"jobs": {}})
         for want in ("Weekly limit: 42% used (+1.8 this hour)", "AI calls: 3", "Average size of each call", "1 full rebuild\n",
-                     "Who used it", "1. Orchestrator — 1 call ·", "DevOps — 2 calls", "Sonnet medium 1, Opus high 1", "Tasks: 0 running"):
+                     "Who used it", "1. Orchestrator — 1 call ·", "DevOps — 2 calls", "Value used at API list prices: $", "Sonnet medium 1, Opus high 1", "Tasks: 0 running"):
             self.assertIn(want, text)
         self.assertLess(len(text), 4000)
 
