@@ -149,10 +149,22 @@ def parse_line(line):
     w1h = int(cc.get("ephemeral_1h_input_tokens") or 0)
     w5 = int(cc["ephemeral_5m_input_tokens"]) if cc.get("ephemeral_5m_input_tokens") is not None else max(0, cw - w1h)
     effort = x.get("effort")
+    # The advisor (a server-side Opus second opinion) is recorded only inside usage.iterations as
+    # type "advisor_message"; the top-level numbers are the sum of the "message" iterations alone (checked on the
+    # host 2026-11-24: a devops call showed 55,560 Opus input + 9,277 output tokens there and none at the top).
+    advisor = []
+    for it in u.get("iterations") or []:
+        if isinstance(it, dict) and it.get("type") == "advisor_message":
+            icc = it.get("cache_creation") if isinstance(it.get("cache_creation"), dict) else {}
+            icw = int(it.get("cache_creation_input_tokens") or 0)
+            i1h = int(icc.get("ephemeral_1h_input_tokens") or 0)
+            advisor.append({"model": str(it.get("model") or "advisor"), "in": int(it.get("input_tokens") or 0),
+                            "read": int(it.get("cache_read_input_tokens") or 0), "w1h": i1h, "w5": max(0, icw - i1h),
+                            "out": int(it.get("output_tokens") or 0)})
     return {"id": str(mid), "ts": ts, "session": str(x.get("sessionId") or ""), "model": model,
             "effort": effort if isinstance(effort, str) and effort else "?",
             "in": int(u.get("input_tokens") or 0), "read": int(u.get("cache_read_input_tokens") or 0),
-            "w5": w5, "w1h": w1h, "out": int(u.get("output_tokens") or 0)}
+            "w5": w5, "w1h": w1h, "out": int(u.get("output_tokens") or 0), "advisor": advisor}
 
 
 GW_DATE = re.compile(rb'"date":\s*"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)"')
@@ -179,12 +191,45 @@ def parse_gateway_line(line):
 
 def new_bucket():
     return {"calls": 0, "ctx": 0, "max_ctx": 0, "in": 0, "read": 0, "w5": 0, "w1h": 0, "out": 0,
-            "wc": 0.0, "wc_write": 0.0, "wc_read": 0.0, "wc_out": 0.0, "big": 0, "big_tok": 0, "new_sessions": 0, "mix": {}}
+            "wc": 0.0, "wc_write": 0.0, "wc_read": 0.0, "wc_out": 0.0, "big": 0, "big_tok": 0, "new_sessions": 0,
+            "start_ctx": 0, "start_write": 0, "advisor": 0, "advisor_tok": 0, "advisor_wc": 0.0, "mix": {}}
 
 
 def short_model(model):
     fam = family(model)
     return fam.capitalize() if fam != "other" else (model or "?")[:18]
+
+
+def add_advisor_calls(state, agent, rec):
+    """Each advisor iteration is a separate Opus call: counted once per (message id, position), into the hour of the
+    call that asked for it."""
+    seen = state.setdefault("seen", {})
+    n = 0
+    for i, it in enumerate(rec.get("advisor") or []):
+        key = f"{rec['id']}#adv{i}"
+        if key in seen:
+            continue
+        seen[key] = [rec["ts"], it["out"], agent]
+        b = state.setdefault("hours", {}).setdefault(hour_key(rec["ts"]), {}).setdefault(agent, new_bucket())
+        ctx = it["in"] + it["read"] + it["w5"] + it["w1h"]
+        total, write, read, out = weights(dict(it, ts=rec["ts"]))
+        b["calls"] += 1
+        b["ctx"] += ctx
+        b["max_ctx"] = max(b["max_ctx"], ctx)
+        for k in ("in", "read", "w5", "w1h", "out"):
+            b[k] += it[k]
+        b["wc"] += total
+        b["wc_write"] += write
+        b["wc_read"] += read
+        b["wc_out"] += out
+        b["advisor"] += 1
+        b["advisor_tok"] += ctx + it["out"]
+        b["advisor_wc"] += total
+        label = f"{short_model(it['model'])} advisor"
+        b["mix"][label] = b["mix"].get(label, 0) + 1
+        state.setdefault("recent", []).append([rec["ts"], agent, ctx, 0, rec["session"][:8]])
+        n += 1
+    return n
 
 
 def add_call(state, agent, rec):
@@ -228,8 +273,10 @@ def add_call(state, agent, rec):
     sessions = state.setdefault("sessions", {})
     if rec["session"] and rec["session"] not in sessions:
         sessions[rec["session"]] = rec["ts"]
-        if not state.get("booting"):
+        if not state.get("booting"):          # the first call of a session: what every new session starts with
             b["new_sessions"] += 1
+            b["start_ctx"] += ctx
+            b["start_write"] += rec["w5"] + rec["w1h"]
     state.setdefault("recent", []).append([rec["ts"], agent, ctx, 1 if big else 0, rec["session"][:8]])
     return True
 
@@ -353,7 +400,8 @@ def week_lines(state, start, end, stop):
 def merge(buckets):
     t = new_bucket()
     for b in buckets:
-        for k in ("calls", "ctx", "in", "read", "w5", "w1h", "out", "wc", "wc_write", "wc_read", "wc_out", "big", "big_tok", "new_sessions"):
+        for k in ("calls", "ctx", "in", "read", "w5", "w1h", "out", "wc", "wc_write", "wc_read", "wc_out", "big", "big_tok",
+                  "new_sessions", "start_ctx", "start_write", "advisor", "advisor_tok", "advisor_wc"):
             t[k] += b.get(k, 0)
         t["max_ctx"] = max(t["max_ctx"], b.get("max_ctx", 0))
         for k, v in b.get("mix", {}).items():
@@ -412,7 +460,12 @@ def render(state, start, end, title, jobs_state=None, stop=95.0):
                   f"   – new text in: {fmt_tok(tot['in'])}",
                   f"   – written answers: {fmt_tok(tot['out'])}"]
         drift = gw["reuse"].get("drift", 0) + gw["reuse"].get("invalidated", 0)
-        lines.append(f"• New sessions: {tot['new_sessions']} · rebuilt after a prompt change: {drift}")
+        start = (f" · each started at {fmt_tok(tot['start_ctx'] / tot['new_sessions'])} tokens ({fmt_tok(tot['start_write'] / tot['new_sessions'])} written fresh)"
+                 if tot["new_sessions"] else "")
+        lines.append(f"• New sessions: {tot['new_sessions']}{start} · rebuilt after a prompt change: {drift}")
+        if tot["advisor"]:
+            lines.append(f"• Advisor (hidden Opus second opinions): {tot['advisor']} call{'' if tot['advisor'] == 1 else 's'} · "
+                         f"{fmt_tok(tot['advisor_tok'])} tokens · ${tot['advisor_wc']:,.2f}")
         if tot["wc"] > 0:
             lines.append(f"• Where the cost went: rebuilding {100 * tot['wc_write'] / tot['wc']:.0f}% · re-reading {100 * tot['wc_read'] / tot['wc']:.0f}% · answers {100 * tot['wc_out'] / tot['wc']:.0f}%")
             lines.append(f"• Value used at API list prices: ${tot['wc']:,.2f} (the plan is not charged per token; this is the yardstick)")
@@ -426,7 +479,8 @@ def render(state, start, end, title, jobs_state=None, stop=95.0):
         ranked = sorted(agents.items(), key=lambda kv: -kv[1]["wc"])
         for i, (a, b) in enumerate(ranked, 1):
             share = 100 * b["wc"] / tot["wc"] if tot["wc"] else 0
-            lines.append(f"{i}. {NAMES.get(a, a)} — {b['calls']:,} call{'' if b['calls'] == 1 else 's'} · {fmt_tok(b['ctx'] / b['calls'])} avg · {mix_text(b['mix'])} · {share:.0f}%")
+            starts = f" · {b['new_sessions']} new, start {fmt_tok(b['start_ctx'] / b['new_sessions'])}" if b["new_sessions"] else ""
+            lines.append(f"{i}. {NAMES.get(a, a)} — {b['calls']:,} call{'' if b['calls'] == 1 else 's'} · {fmt_tok(b['ctx'] / b['calls'])} avg{starts} · {mix_text(b['mix'])} · {share:.0f}%")
     if jobs_state is not None:
         running, done, blocked, failed, ended = task_counts(jobs_state, start, end)
         lines += ["", f"Tasks: {running} running now · this {span}: {done} done ✅ · {blocked} blocked · {failed} failed"
@@ -598,8 +652,8 @@ def ingest(state, projects_root, gateway_dir, now, read_cap=RUN_READ_CAP):
             files[path] = entry
         for line in lines:
             rec = parse_line(line)
-            if rec and now - rec["ts"] < KEEP_HOURS * HOUR_S and add_call(state, agent, rec):
-                calls += 1
+            if rec and now - rec["ts"] < KEEP_HOURS * HOUR_S:
+                calls += add_call(state, agent, rec) + add_advisor_calls(state, agent, rec)
     gw_files = sorted(Path(gateway_dir).glob("openclaw-20*.log")) if gateway_dir and Path(gateway_dir).exists() else []
     for p in gw_files[-2:]:
         present.add(str(p))

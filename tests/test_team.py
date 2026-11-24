@@ -727,6 +727,16 @@ class InstallUnitsTest(unittest.TestCase):
         self.assertEqual(started, ["openclaw-team-heal.timer"])  # only the one not yet enabled
 
 
+class ClaudeEnvTest(unittest.TestCase):
+    def test_gateway_dropin_sets_the_switches_and_the_check_reads_them(self):
+        conf = teamlib.UNITS["openclaw-gateway.service.d/team-claude-env.conf"]
+        for k, v in teamlib.GATEWAY_CLAUDE_ENV.items():
+            self.assertIn(f"Environment={k}={v}", conf)
+        self.assertEqual(teamlib.env_missing(b"PATH=/bin\0CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1\0CLAUDE_CODE_DISABLE_AUTO_MEMORY=1\0"), [])
+        self.assertEqual(teamlib.env_missing(b"CLAUDE_CODE_DISABLE_ADVISOR_TOOL=0\0"),
+                         ["CLAUDE_CODE_DISABLE_ADVISOR_TOOL", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"])
+
+
 class StartupFailuresTest(unittest.TestCase):
     def test_verify_fails_after_a_failed_gateway_start(self):
         import os

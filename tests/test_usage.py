@@ -73,6 +73,43 @@ class ParseTest(unittest.TestCase):
         self.assertIsNone(usage.parse_gateway_line(b'{"1":"something else","_meta":{"date":"2026-11-28T08:00:00Z"}}'))
 
 
+def advised(mid, ts, session="s1"):
+    """A Sonnet call that consulted the advisor: the Opus tokens are only inside usage.iterations."""
+    return json.dumps({"type": "assistant", "timestamp": iso(ts), "sessionId": session, "effort": "medium",
+                       "message": {"id": mid, "role": "assistant", "model": "claude-sonnet-5-5",
+                                   "usage": {"input_tokens": 4, "cache_read_input_tokens": 79787, "cache_creation_input_tokens": 29810,
+                                             "output_tokens": 411, "cache_creation": {"ephemeral_1h_input_tokens": 29810},
+                                             "iterations": [
+                                                 {"type": "message", "input_tokens": 2, "cache_read_input_tokens": 25814, "cache_creation_input_tokens": 28159, "output_tokens": 26},
+                                                 {"type": "advisor_message", "model": "claude-opus-5-5", "input_tokens": 55560, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 9277},
+                                                 {"type": "message", "input_tokens": 2, "cache_read_input_tokens": 53973, "cache_creation_input_tokens": 1651, "output_tokens": 385}]}}})
+
+
+class AdvisorAndStartTest(unittest.TestCase):
+    def test_advisor_iterations_are_counted_as_opus_calls_once(self):
+        st = {}
+        for line in (advised("m1", T0 + 10), advised("m1", T0 + 11)):   # the record repeats
+            rec = usage.parse_line(line.encode())
+            usage.add_call(st, "devops", rec)
+            usage.add_advisor_calls(st, "devops", rec)
+        b = st["hours"][usage.hour_key(T0)]["devops"]
+        self.assertEqual((b["calls"], b["advisor"], b["in"], b["out"]), (2, 1, 55564, 411 + 9277))
+        self.assertIn("Opus advisor", b["mix"])
+        self.assertAlmostEqual(b["advisor_wc"], 4e-6 * (55560 + 5 * 9277))
+        text = usage.render(st, T0, T0 + 3600, "t")
+        self.assertIn("Advisor (hidden Opus second opinions): 1 call", text)
+
+    def test_session_start_size(self):
+        st = {"booting": False}
+        usage.add_call(st, "writer", usage.parse_line(call("a", T0 + 10, session="new", read=11453, w1h=28097).encode()))
+        usage.add_call(st, "writer", usage.parse_line(call("b", T0 + 20, session="new", read=40000, w1h=500).encode()))
+        b = st["hours"][usage.hour_key(T0)]["writer"]
+        self.assertEqual((b["new_sessions"], b["start_ctx"], b["start_write"]), (1, 2 + 11453 + 28097, 28097))
+        text = usage.render(st, T0, T0 + 3600, "t")
+        self.assertIn("each started at 40k tokens (28k written fresh)", text)
+        self.assertIn("1 new, start 40k", text)
+
+
 class IngestTest(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp()

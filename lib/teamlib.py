@@ -746,7 +746,31 @@ UNITS = {
     "openclaw-team-usage.service": "[Unit]\nDescription=openclaw-team: hourly usage report and alarms (no AI)\n\n[Service]\nType=oneshot\nNice=19\nIOSchedulingClass=idle\nCPUQuota=30%\nMemoryMax=400M\nTimeoutStartSec=8min\nExecStart=/usr/bin/python3 %h/openclaw-team/bin/team usage\n",
     "openclaw-team-usage.timer": "[Unit]\nDescription=openclaw-team usage report (hourly at :02) and alarms every 10 minutes\n\n[Timer]\nOnCalendar=*:02/10\nAccuracySec=20s\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
     "openclaw-gateway.service.d/team-mcp-timeout.conf": "[Service]\nEnvironment=MCP_TIMEOUT=120000\n",
+    # 2026-11-24 (owner approved): OpenClaw starts every agent's Claude Code with --setting-sources user, so the host
+    # user's ~/.claude leaks into all agents. The advisor (advisorModel Opus) made hidden Opus calls inside agent turns
+    # (about 142 in 14 days; their tokens sit only in usage.iterations), and auto memory injected MEMORY.md into every
+    # session start. Both have an official off switch (code.claude.com/docs/en/env-vars); OpenClaw's CLAUDE_CLI_CLEAR_ENV
+    # does not strip them, so the agents' claude processes inherit them from the gateway. The owner's own Claude use
+    # on the host is not touched (this only sets the gateway's environment). A gateway restart applies it.
+    "openclaw-gateway.service.d/team-claude-env.conf": "[Service]\nEnvironment=CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1\nEnvironment=CLAUDE_CODE_DISABLE_AUTO_MEMORY=1\n",
 }
+GATEWAY_CLAUDE_ENV = {"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+
+
+def env_missing(environ, wanted=None):
+    """Names from `wanted` that the NUL-separated environ bytes of a process do not set to the wanted value."""
+    have = dict(x.split(b"=", 1) for x in environ.split(b"\0") if b"=" in x)
+    return [k for k, v in (wanted or GATEWAY_CLAUDE_ENV).items() if have.get(k.encode()) != v.encode()]
+
+
+def gateway_env_check():
+    """Proof without tokens that the running gateway (and so every agent's claude process) has the Claude switches."""
+    pid = subprocess.run(["systemctl", "--user", "show", "-p", "MainPID", "--value", "openclaw-gateway"], capture_output=True, text=True).stdout.strip()
+    try:
+        missing = env_missing(Path(f"/proc/{pid}/environ").read_bytes())
+    except (OSError, ValueError):
+        return (False, "gateway environment unreadable (is the gateway running?)")
+    return (not missing, "agents' Claude switches in the gateway environment: " + ("advisor off, auto memory off" if not missing else f"missing {missing} (restart the gateway)"))
 TIMERS = ("openclaw-team-drift.timer", "openclaw-team-report.timer", "openclaw-team-gc.timer", "openclaw-team-disk.timer", "openclaw-team-graphs.timer",
           "openclaw-team-heal.timer", "openclaw-team-prio.timer", "openclaw-team-watch.timer", "openclaw-team-usage.timer")
 
@@ -1408,6 +1432,7 @@ def checks(team, projects):
     for timer in TIMERS:
         t = subprocess.run(["systemctl", "--user", "is-active", timer], capture_output=True, text=True).stdout.strip()
         results.append((t == "active", f"{timer} {t}"))
+    results.append(gateway_env_check())
     percent, free = disk.usage()
     results.append((percent < disk.config(team)["critical_percent"], f"disk {percent}% used, {free} GB free"))
     results.extend(graphs.checks(team, projects))
