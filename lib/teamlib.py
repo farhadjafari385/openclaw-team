@@ -413,6 +413,9 @@ def guard_config(team, projects, live, mirror=True):
             # Wakes and triage run in a team session with no chat attached: in the main session (the owner's DM)
             # the answers to results were delivered to the owner's private chat instead of the task threads.
             "idleWakeSession": f"agent:{orch}:explicit:team-ops",
+            # That session starts fresh when it is quiet (token-guard fresh.js): its history was written to the
+            # prompt cache again at almost every wake, 52% of the orchestrator's usage on 2026-11-23.
+            "fresh": {"enabled": bool(jobs.get("fresh_session", True)), "everyMinutes": int(jobs.get("fresh_every_minutes", 30))},
         },
     }
 

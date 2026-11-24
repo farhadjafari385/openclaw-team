@@ -183,6 +183,10 @@ class BoardTopicsSessionsTest(unittest.TestCase):
         # what must not be woken again (next line).
         self.assertEqual(g["triage"]["maxWakesPerDay"], 48)
         self.assertEqual(g["triage"]["sameStateRewakeMinutes"], 180)
+        # 2026-11-23: the session that receives the wakes starts fresh when quiet (it was 30% of all usage, half
+        # of it its own history written to the cache again). Only that session: never a chat with the owner.
+        self.assertEqual(g["jobs"]["fresh"], {"enabled": True, "everyMinutes": 30})
+        self.assertRegex(g["jobs"]["idleWakeSession"], r"^agent:[a-z]+:explicit:team-ops$")
 
     def test_up_to_10_items_at_once_in_the_owners_project_order_and_ci_followed_by_the_guard(self):
         # Owner 2026-11-09 ("DO THEM ALL"): one item at a time left the team idle 46% of the last 48 h;

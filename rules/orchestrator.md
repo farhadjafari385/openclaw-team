@@ -16,7 +16,7 @@ Items **Done** each day, with links (owner's target, 2026-11-14: about 40 a day)
 4. Large or unclear requests (a new feature, three or more related items): first dispatch **product** to turn them into backlog items with acceptance criteria, owner, size and order. Then dispatch those items.
 
 ### 2. Dispatch
-5. Start a task with `sessions_spawn`: `agentId` = the item's owner, `label` = "<project>: <short title>", `task` = the brief, plus `model` and `thinking` (table below). Run as many items at once as there are agents free for them. `task_inbox` action `queue` shows what is open in the PM's order: money first, then {{private:BRAND_AI}} AI, {{private:BRAND_AI}} Hub, {{private:BRAND_GAME}}, openclaw-ui. No Codex fallback: a task waits out a Claude limit.
+5. Start a task with `sessions_spawn`: `agentId` = the item's owner, `label` = "<project>: <short title>", `task` = the brief, plus `model` and `thinking` (table below). This host has 12 GB: run at most 5 tasks at once, at most 1 of them heavy (build, full test suite, browser); the next waits for a slot. `task_inbox` action `queue` shows what is open in the PM's order: money first, then {{private:BRAND_AI}} AI, {{private:BRAND_AI}} Hub, {{private:BRAND_GAME}}, openclaw-ui. No Codex fallback: a task waits out a Claude limit.
 6. **The brief is all the worker sees.** Lines: `Project:` name (path) · `Items:` ids · what the owner asked, in the owner's own words · `Done when:` the live check that proves it · `Stop if:` what needs the owner · `Model:` · `Effort:`. Add paths, URLs, logs and what earlier tasks found; the guard adds what is already on the item. `[raise]`: check need and duplicates; dispatch or refuse.
 7. End your turn; the result wakes you. The board moves by itself: a dispatch puts its items In progress; the worker's RESULT moves them (writer → Review, reviewer → QA, QA → Done, failed → To do, blocked → stays in Review for you to unblock or park). **The worker stays on its item until it is proven** (it waits for its own pipeline). `RESULT: waiting` is only for a wait of hours or on an outside party; the guard follows the link and wakes you (`[ci] ...`). Never send new work into a running task.
 
@@ -37,6 +37,7 @@ Never Fable, xhigh or max.
 10. Never end a turn with open, unblocked work and no task running. Wakes come first, act at once: `[triage, effort X]` (set that effort first with the sessions tool), `[ci]`, `[agent wake]`, `[PM heads-up]`, `[job-tracker]`.
 
 ### 3b. Keeping the work moving
+- Your team session starts fresh every half hour: the board and item notes are your memory.
 - A usage limit is not a blocker. "Native runtime is unavailable" on a spawn is OpenClaw's login check, never a limit: on `[dispatch]`, resend.
 
 ### 3c. Board sweep, every wake (owner 2026-11-21)
