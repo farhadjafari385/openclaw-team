@@ -23,6 +23,11 @@ import time
 from pathlib import Path
 
 DEFAULTS = {
+    # From pressure_percent the clean-up gets harder (unused CI runner caches, build cache cut to 2 GB instead of 6 GB).
+    # 2026-11-23 (item 1c1b3f47): the disk sat at 85% while only the 90% / Sunday guard acted. Every run already removes the
+    # safe leftovers at any level; this only starts the harder (still safe) steps earlier. Volumes with data, running
+    # containers and tagged images are never touched at any level.
+    "pressure_percent": 75,
     "warn_percent": 80,
     "critical_percent": 90,
     "notify_every_hours": 6,
@@ -368,7 +373,8 @@ def runner_cache_volume(v):
 
 
 def clean_docker(cfg, now, log, dry=False, pressure=False):
-    """pressure: the disk is past warn_percent, so unused runner caches go too and the build cache is cut harder."""
+    """pressure: the disk is past pressure_percent, so unused runner caches go too and the build cache is cut harder.
+    Images: only dangling (untagged) ones are pruned, so running containers' images and tagged rollback images stay."""
     if not shutil.which("docker"):
         return 0
     done = 0
@@ -394,12 +400,18 @@ def clean_docker(cfg, now, log, dry=False, pressure=False):
         if not dry:
             run(["docker", "volume", "rm", *caches], timeout=900)
         done += len(caches)
-    if not dry:
+    dangling = run(["docker", "image", "ls", "-q", "-f", "dangling=true"]).stdout.split()
+    if dangling:
+        log(f"{'would remove' if dry else 'removing'} {len(dangling)} dangling images (tagged and running images are kept)")
+    cap = "2GB" if pressure else "6GB"
+    if dry:
+        log(f"would cut the build cache to {cap}")
+    else:
         run(["docker", "image", "prune", "-f"], timeout=900)
         # Image builds leave their layers in the build cache (10 GB on 2026-11-11). A size cap keeps the newest layers
         # (base images, npm) so a rare release is not built cold; an age filter dropped them all (d68a69cb).
         # --reserved-space is the renamed --keep-storage (Docker 29).
-        run(["docker", "builder", "prune", "-f", "--reserved-space", "2GB" if pressure else "6GB"], timeout=1800)
+        run(["docker", "builder", "prune", "-f", "--reserved-space", cap], timeout=1800)
     return done
 
 
@@ -430,9 +442,12 @@ def janitor(team, notify, dry=False, now=None, log=print):
         lines.append(msg)
         log(msg)
 
+    pressure = before >= min(cfg["pressure_percent"], cfg["warn_percent"])
+    note(f"disk {before}%: " + (f"over {cfg['pressure_percent']}%, hard (safe) clean-up: unused CI runner caches and a 2 GB build cache cap"
+                                if pressure else "normal clean-up"))
     counts = {"browser profiles and /tmp copies": clean_tmp(cfg, now, note, dry),
               "git worktrees": clean_worktrees(cfg, now, note, dry),
-              "docker leftovers": clean_docker(cfg, now, note, dry, pressure=before >= cfg["warn_percent"])}
+              "docker leftovers": clean_docker(cfg, now, note, dry, pressure=pressure)}
     percent, free = usage()
     log(f"disk {before}% -> {percent}% used, {free} GB free; cleaned: " + ", ".join(f"{v} {k}" for k, v in counts.items()))
     state_file = expand(cfg["state_file"])

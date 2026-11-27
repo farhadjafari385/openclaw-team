@@ -109,6 +109,43 @@ class Rules(unittest.TestCase):
         disk.clean_docker(cfg, NOW, lambda m: None, dry=True, pressure=True)
         self.assertFalse([c for c in calls if c[1:3] in (["volume", "rm"], ["builder", "prune"])], "a dry run removes nothing")
 
+    def test_pressure_starts_at_75_and_a_dry_run_lists_what_goes(self):
+        self.assertEqual(disk.DEFAULTS["pressure_percent"], 75)
+        self.assertLess(disk.DEFAULTS["pressure_percent"], disk.DEFAULTS["warn_percent"])
+        calls = []
+
+        def fake(cmd, timeout=300):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, "sha1\nsha2\n" if cmd[:4] == ["docker", "image", "ls", "-q"] else "", "")
+        orig = (disk.run, disk.usage, disk.clean_tmp, disk.clean_worktrees)
+
+        def restore():
+            disk.run, disk.usage, disk.clean_tmp, disk.clean_worktrees = orig
+        self.addCleanup(restore)
+        disk.run = fake
+        disk.clean_tmp = disk.clean_worktrees = lambda *a, **k: 0
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        team = {"disk": {"state_file": tmp + "/disk.json", "backup_dir": tmp + "/b", "repo_roots": [], "tmp_dirs": [], "root_tmp_dirs": []}}
+        which = disk.shutil.which
+        disk.shutil.which = lambda name: "/usr/bin/docker"
+        self.addCleanup(setattr, disk.shutil, "which", which)
+        for pct, hard in ((74.0, False), (76.0, True), (85.0, True)):
+            calls.clear()
+            disk.usage = lambda path="/", pct=pct: (pct, 20.0)
+            out = disk.janitor(team, lambda t: True, dry=True, now=NOW, log=lambda m: None)
+            self.assertEqual(any("hard" in line for line in out["lines"]), hard, pct)
+            self.assertTrue(any("would remove 2 dangling images" in line for line in out["lines"]))
+            self.assertTrue(any("would cut the build cache to " + ("2GB" if hard else "6GB") in line for line in out["lines"]))
+            self.assertFalse([c for c in calls if c[1:3] in (["image", "prune"], ["builder", "prune"], ["volume", "rm"], ["rm", "-f"])],
+                             "a dry run removes nothing")
+        calls.clear()
+        disk.usage = lambda path="/": (76.0, 20.0)
+        disk.janitor(team, lambda t: True, now=NOW, log=lambda m: None)
+        self.assertIn(["docker", "builder", "prune", "-f", "--reserved-space", "2GB"], calls)
+        self.assertIn(["docker", "image", "prune", "-f"], calls, "dangling only: no -a, so tagged and running images stay")
+        self.assertFalse([c for c in calls if "-a" in c or "--all" in c])
+
     def test_docker_times(self):
         self.assertAlmostEqual(disk.parse_ts("2026-11-05T21:42:31.123456789Z"), calendar.timegm((2026, 11, 5, 21, 42, 31)) + 0.123456, places=3)
         self.assertEqual(disk.parse_ts("2026-11-05T16:42:31-05:00"), disk.parse_ts("2026-11-05T21:42:31Z"))
